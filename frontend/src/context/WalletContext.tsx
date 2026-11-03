@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react';
-import { newWallet } from '../api/client';
+import { newWallet, restoreWallet } from '../api/client';
 import { getStoredWallets, saveWallet as persistWallet, removeWallet as removeStoredWallet, type StoredWallet } from '../utils/walletStorage';
 
 interface ConnectedWallet {
@@ -16,8 +16,18 @@ interface WalletContextType {
   savedWallets: StoredWallet[];
   /** Conecta a uma carteira existente */
   connect: (address: string, privateKeyPem: string, publicKey: string, label?: string) => void;
-  /** Cria e conecta uma nova carteira via API */
-  createAndConnect: () => Promise<void>;
+  /**
+   * Cria e conecta uma nova carteira via API.
+   * Retorna a frase de recuperação (24 palavras), que existe só em memória:
+   * o chamador deve exibi-la uma vez e descartá-la.
+   */
+  createAndConnect: () => Promise<string | null>;
+  /**
+   * Recupera uma carteira a partir da frase de 24 palavras e conecta.
+   * A frase não é armazenada em lugar nenhum.
+   * Retorna o endereço restaurado.
+   */
+  restoreAndConnect: (mnemonic: string) => Promise<string>;
   /** Desconecta a carteira atual */
   disconnect: () => void;
   /** Remove uma carteira salva */
@@ -88,11 +98,11 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     refreshSavedWallets();
   }, [wallet, disconnect, refreshSavedWallets]);
 
-  const createAndConnect = useCallback(async () => {
+  const createAndConnect = useCallback(async (): Promise<string | null> => {
     try {
       const w = await newWallet();
       const label = `Carteira ${w.address.slice(0, 8)}...`;
-      // Salva no localStorage
+      // Salva no localStorage (sem a frase de recuperação: ela nunca é persistida)
       persistWallet({
         address: w.address,
         public_key: w.public_key_pem || '',
@@ -101,8 +111,27 @@ export function WalletProvider({ children }: { children: ReactNode }) {
         created_at: Date.now(),
       });
       connect(w.address, w.private_key_pem, w.public_key_pem, label);
+      return w.mnemonic ?? null;
     } catch (err: any) {
       throw new Error(err?.response?.data?.error || err.message || 'Erro ao criar carteira');
+    }
+  }, [connect]);
+
+  const restoreAndConnect = useCallback(async (mnemonic: string): Promise<string> => {
+    try {
+      const w = await restoreWallet(mnemonic);
+      const label = `Carteira ${w.address.slice(0, 8)}...`;
+      persistWallet({
+        address: w.address,
+        public_key: w.public_key_pem || '',
+        private_key_pem: w.private_key_pem || '',
+        label,
+        created_at: Date.now(),
+      });
+      connect(w.address, w.private_key_pem, w.public_key_pem, label);
+      return w.address;
+    } catch (err: any) {
+      throw new Error(err?.response?.data?.error || err.message || 'Erro ao restaurar carteira');
     }
   }, [connect]);
 
@@ -113,6 +142,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
         savedWallets,
         connect,
         createAndConnect,
+        restoreAndConnect,
         disconnect,
         removeWallet,
         isConnected: !!wallet,

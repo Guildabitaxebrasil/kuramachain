@@ -40,6 +40,9 @@ export const mineBlock = (miner_address?: string) =>
 
 // Wallet (POST para prevenir CSRF)
 export const newWallet = () => postData<WalletInfo>('/wallet/new', {});
+/** Recupera uma carteira existente a partir da frase de recuperação (24 palavras). */
+export const restoreWallet = (mnemonic: string) =>
+  postData<WalletInfo>('/wallet/restore', { mnemonic });
 export const getBalance = (address: string) => fetchData<BalanceResponse>(`/balance/${address}`);
 
 // Network

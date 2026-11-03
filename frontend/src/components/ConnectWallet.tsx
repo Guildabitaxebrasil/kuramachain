@@ -2,6 +2,9 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useWallet } from '../context/WalletContext';
 import { getBalance } from '../api/client';
+import RecoveryPhraseModal from './RecoveryPhraseModal';
+import RestoreWalletForm from './RestoreWalletForm';
+import ExportPhraseModal from './ExportPhraseModal';
 
 export default function ConnectWallet() {
   const navigate = useNavigate();
@@ -13,7 +16,10 @@ export default function ConnectWallet() {
   const [error, setError] = useState('');
   const [pasteAddress, setPasteAddress] = useState('');
   const [selectedSaved, setSelectedSaved] = useState('');
-  const [view, setView] = useState<'menu' | 'create' | 'existing' | 'paste'>('menu');
+  const [view, setView] = useState<'menu' | 'create' | 'restore' | 'existing' | 'paste'>('menu');
+  // Frase de recuperação recém-gerada: só em memória, descartada ao fechar.
+  const [recoveryPhrase, setRecoveryPhrase] = useState<string | null>(null);
+  const [exportOpen, setExportOpen] = useState(false);
   const overlayRef = useRef<HTMLDivElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -49,9 +55,10 @@ export default function ConnectWallet() {
     setLoading(true);
     setError('');
     try {
-      await createAndConnect();
+      const phrase = await createAndConnect();
       setShowModal(false);
       setView('menu');
+      if (phrase) setRecoveryPhrase(phrase);
     } catch (err: any) {
       setError(err.message || 'Erro ao criar carteira');
     } finally {
@@ -119,7 +126,7 @@ export default function ConnectWallet() {
             onClick={handleOverlayClick}
             className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
           >
-            <div className="bg-kur-bg-card border border-kur-border rounded-2xl w-full max-w-md shadow-2xl">
+            <div className="bg-kur-bg-card/95 backdrop-blur-xl border border-kur-border rounded-2xl w-full max-w-md shadow-2xl shadow-glow-sm">
               {/* Header */}
               <div className="flex items-center justify-between px-6 py-4 border-b border-kur-border">
                 <h2 className="text-lg font-bold text-kur-text">Conectar Carteira</h2>
@@ -159,6 +166,17 @@ export default function ConnectWallet() {
                     </button>
 
                     <button
+                      onClick={() => setView('restore')}
+                      className="w-full flex items-center gap-3 px-4 py-3 bg-kur-bg border border-kur-border rounded-xl hover:border-kur-accent/30 hover:bg-kur-accent/5 transition-all text-left"
+                    >
+                      <span className="text-2xl">🔑</span>
+                      <div>
+                        <p className="text-sm font-medium text-kur-text">Restaurar com frase</p>
+                        <p className="text-xs text-kur-text-muted">Recupera uma carteira com as 24 palavras</p>
+                      </div>
+                    </button>
+
+                    <button
                       onClick={() => setView('existing')}
                       className="w-full flex items-center gap-3 px-4 py-3 bg-kur-bg border border-kur-border rounded-xl hover:border-kur-accent/30 hover:bg-kur-accent/5 transition-all text-left"
                     >
@@ -191,15 +209,15 @@ export default function ConnectWallet() {
                     <div className="bg-kur-accent/5 border border-kur-accent/20 rounded-xl p-4">
                       <p className="text-sm text-kur-text font-medium mb-2">🔐 Nova Carteira Kurama</p>
                       <p className="text-xs text-kur-text-muted">
-                        Será gerado um par de chaves ECDSA (secp256k1). 
-                        A chave privada ficará salva apenas no seu navegador.
-                        Use-a para assinar transações.
+                        Será gerado um par de chaves ECDSA (secp256k1) com uma frase de
+                        recuperação de 24 palavras. Anote a frase em papel: ela aparece uma
+                        única vez e não fica salva no navegador nem no servidor.
                       </p>
                     </div>
                     <button
                       onClick={handleCreate}
                       disabled={loading}
-                      className="w-full px-4 py-3 bg-kur-accent text-white rounded-xl hover:bg-kur-accent/90 transition-colors text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                      className="w-full px-4 py-3 bg-kur-gradient text-white rounded-xl hover:brightness-110 transition-all text-sm font-semibold shadow-glow-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                     >
                       {loading ? (
                         <>
@@ -219,6 +237,23 @@ export default function ConnectWallet() {
                     >
                       Voltar
                     </button>
+                  </div>
+                )}
+
+                {view === 'restore' && (
+                  <div className="space-y-4">
+                    <div className="bg-kur-accent/5 border border-kur-accent/20 rounded-xl p-4">
+                      <p className="text-sm text-kur-text font-medium mb-2">🔑 Restaurar carteira</p>
+                      <p className="text-xs text-kur-text-muted">
+                        Informe as 24 palavras da frase de recuperação, na ordem original.
+                        A frase não é salva em lugar nenhum; ela é usada apenas para
+                        recriar as chaves desta carteira.
+                      </p>
+                    </div>
+                    <RestoreWalletForm
+                      onRestored={() => { setShowModal(false); setView('menu'); }}
+                      onCancel={() => setView('menu')}
+                    />
                   </div>
                 )}
 
@@ -266,7 +301,7 @@ export default function ConnectWallet() {
                         <button
                           onClick={handleConnectSaved}
                           disabled={!selectedSaved}
-                          className="w-full px-4 py-2.5 bg-kur-accent text-white rounded-xl hover:bg-kur-accent/90 transition-colors text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                          className="w-full px-4 py-2.5 bg-kur-gradient text-white rounded-xl hover:brightness-110 transition-all text-sm font-semibold shadow-glow-sm disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                           Conectar
                         </button>
@@ -366,6 +401,13 @@ export default function ConnectWallet() {
               <span>Ir para Carteira</span>
             </button>
             <button
+              onClick={() => { setDropdownOpen(false); setExportOpen(true); }}
+              className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs text-kur-text hover:bg-kur-bg-hover transition-colors text-left"
+            >
+              <span>🔑</span>
+              <span>Exportar frase</span>
+            </button>
+            <button
               onClick={handleDisconnect}
               className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs text-kur-red hover:bg-kur-red/5 transition-colors text-left"
             >
@@ -374,6 +416,18 @@ export default function ConnectWallet() {
             </button>
           </div>
         </div>
+      )}
+
+      {recoveryPhrase && (
+        <RecoveryPhraseModal
+          mnemonic={recoveryPhrase}
+          address={currentAddress ?? ''}
+          onClose={() => setRecoveryPhrase(null)}
+        />
+      )}
+
+      {exportOpen && currentAddress && (
+        <ExportPhraseModal address={currentAddress} onClose={() => setExportOpen(false)} />
       )}
     </div>
   );

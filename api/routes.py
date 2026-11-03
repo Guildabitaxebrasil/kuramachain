@@ -42,6 +42,9 @@ from functools import wraps
 from flasgger import Swagger
 
 from core.crypto_utils import CryptoUtils
+from core.mnemonic import (
+    generate_mnemonic, is_valid_mnemonic, private_key_pem_from_mnemonic,
+)
 from core.transaction import Transaction
 from core.wallet import Wallet
 from core.blockchain import Blockchain
@@ -438,7 +441,7 @@ def require_p2p_nonce(f):
 
 
 def create_app(blockchain: Blockchain = None, node_address: str = None,
-               port: int = 5000) -> Flask:
+               port: int = 5000, mining_cooldown: float = None) -> Flask:
     """
     Cria e configura a aplicação Flask.
 
@@ -446,6 +449,8 @@ def create_app(blockchain: Blockchain = None, node_address: str = None,
         blockchain: Instância da blockchain (criada se None)
         node_address: Endereço do nó (carteira do minerador)
         port: Porta do servidor
+        mining_cooldown: Intervalo mínimo entre blocos em segundos
+            (None = alvo da rede, 600s = 10 min; 0 desliga a checagem)
 
     Returns:
         Aplicação Flask configurada
@@ -516,6 +521,34 @@ Documentação completa dos endpoints e schemas.
 
     # Estado da aplicação
     app.blockchain = blockchain or Blockchain(difficulty=4)
+
+    # Intervalo mínimo entre blocos (s). None = alvo da rede (600s = 10 min);
+    # 0 desliga a checagem (usado nos testes, que mineram em sequência).
+    app.mining_cooldown = (
+        TARGET_BLOCK_TIME if mining_cooldown is None else float(mining_cooldown)
+    )
+
+    # ─── Ritmo de blocos (alvo de 10 minutos) ────────────────────
+    # Como no Bitcoin, um bloco novo só pode ser minerado a cada
+    # `app.mining_cooldown` segundos contados do topo da cadeia. Sem isso o
+    # minerador automático fecha um bloco por segundo e a recompensa vira
+    # torneira aberta. O gênese (timestamp 0) não conta: a primeira mineração
+    # é livre.
+    def _seconds_until_next_block() -> float:
+        """Quanto falta (s) para liberar o próximo bloco. 0 = pode minerar."""
+        return app.blockchain.seconds_until_next_block(
+            getattr(app, 'mining_cooldown', TARGET_BLOCK_TIME))
+
+    def _block_cooldown_response(wait: float):
+        """Resposta 429 dizendo quanto falta para o próximo bloco."""
+        return jsonify({
+            'error': 'Ritmo de blocos: o último bloco foi minerado ainda há '
+                     'pouco. Aguarde o intervalo alvo antes de minerar.',
+            'retry_after': round(wait, 1),
+            'next_block_at': time.time() + wait,
+            'target_block_time': getattr(app, 'mining_cooldown',
+                                         TARGET_BLOCK_TIME),
+        }), 429
 
     # Nós vizinhos na rede (URLs base)
     # Dict: {url: {resolved_ip, registered_at, last_seen}}
@@ -618,6 +651,11 @@ Documentação completa dos endpoints e schemas.
                     'hint': 'Forneça um endereço Base58 Kurama válido ou deixe vazio para usar o endereço do nó.'
                 }), 400
 
+        # Ritmo de blocos: a recompensa só é paga a cada 10 minutos.
+        wait = _seconds_until_next_block()
+        if wait > 0:
+            return _block_cooldown_response(wait)
+
         # Executa a mineração (a coinbase é inserida automaticamente
         # pelo mine_block(), mesmo com mempool vazia)
         block = app.blockchain.mine_block(miner_address)
@@ -681,6 +719,12 @@ Documentação completa dos endpoints e schemas.
                     'hint': 'Informe um endereço Base58 Kurama válido.'
                 }), 400
 
+        # O template só existe quando o próximo bloco já pode ser minerado,
+        # senão o minerador resolveria PoW para nada.
+        wait = _seconds_until_next_block()
+        if wait > 0:
+            return _block_cooldown_response(wait)
+
         template = app.blockchain.create_mining_template(miner_address)
         return jsonify(template), 200
 
@@ -700,6 +744,10 @@ Documentação completa dos endpoints e schemas.
 
         if not data or not isinstance(data, dict):
             return jsonify({'error': 'Bloco não fornecido'}), 400
+
+        wait = _seconds_until_next_block()
+        if wait > 0:
+            return _block_cooldown_response(wait)
 
         try:
             block = app.blockchain.submit_mined_block(data)
@@ -807,7 +855,18 @@ Documentação completa dos endpoints e schemas.
     @rate_limit
     def new_wallet():
         """
-        Gera uma nova carteira.
+        Gera uma nova carteira e a frase de recuperação de 24 palavras.
+
+        A chave privada é derivada da frase (BIP39 + BIP32), então a própria
+        frase recria a carteira. Trate a frase como a chave: quem a tiver
+        controla os fundos.
+
+        A frase é gerada em memória e devolvida UMA ÚNICA VEZ nesta resposta.
+        Ela não é gravada em disco, banco, log ou qualquer armazenamento —
+        o usuário precisa anotá-la (em papel) na hora.
+
+        Em produção, o ideal é que a frase seja gerada no próprio cliente
+        (Web Crypto), para nunca trafegar pela rede.
 
         ATENÇÃO (Ambiente de Desenvolvimento):
         - A chave privada é retornada APENAS para facilitar o desenvolvimento
@@ -816,15 +875,20 @@ Documentação completa dos endpoints e schemas.
           A assinatura deve ser feita exclusivamente no navegador.
         - Guarde a chave privada com segurança!
         """
-        wallet = Wallet()
+        mnemonic = generate_mnemonic()
+        wallet = Wallet(private_key_pem=private_key_pem_from_mnemonic(mnemonic))
         print(f"[KEY] NOVA CARTEIRA CRIADA: {wallet.address}")
-        # NUNCA logar chave privada — vulnerabilidade de segurança (A-03)
+        # NUNCA logar a frase de recuperação nem a chave privada (A-03)
 
         # ─── Retorna dados públicos da carteira ─────────────────
         # A chave privada NUNCA deve ser transmitida pela rede (C-01).
         # Em produção, a assinatura é feita exclusivamente no cliente.
         data = wallet.export_public()
-        
+        # Frase de recuperação: exibida uma única vez pelo frontend e nunca
+        # persistida. Sem ela não há como recuperar esta carteira.
+        data['mnemonic'] = mnemonic
+        data['mnemonic_words'] = len(mnemonic.split())
+
         if _is_production_mode():
             data['warning'] = 'Guarde sua chave privada com segurança! Ela não pode ser recuperada.'
         else:
@@ -832,6 +896,47 @@ Documentação completa dos endpoints e schemas.
             data['private_key_pem'] = wallet.private_key_pem
             data['warning'] = 'DEV MODE: Chave privada retornada apenas para desenvolvimento.'
         
+        return jsonify(data), 200
+
+    @app.route('/wallet/restore', methods=['POST'])
+    @rate_limit
+    def restore_wallet():
+        """
+        Recria uma carteira a partir da frase de recuperação de 24 palavras.
+
+        A frase é usada apenas para derivar as chaves e validar o checksum
+        (BIP39). Ela NÃO é armazenada nem logada — o servidor não guarda
+        nada sobre ela depois de responder.
+
+        Body JSON:
+            {"mnemonic": "palavra1 palavra2 ... palavra24"}
+        """
+        data_in = request.get_json(silent=True) or {}
+        mnemonic = ' '.join(str(data_in.get('mnemonic', '')).split()).lower()
+
+        if not mnemonic:
+            return jsonify({'error': 'Informe a frase de recuperação.'}), 400
+
+        # Valida quantidade de palavras, wordlist e checksum antes de derivar
+        if not is_valid_mnemonic(mnemonic):
+            return jsonify({
+                'error': 'Frase de recuperação inválida. '
+                         'Confira as 24 palavras e a ordem.'
+            }), 400
+
+        try:
+            wallet = Wallet(private_key_pem=private_key_pem_from_mnemonic(mnemonic))
+        except Exception:
+            return jsonify({'error': 'Não foi possível restaurar a carteira.'}), 400
+
+        data = wallet.export_public()
+        data['mnemonic_words'] = len(mnemonic.split())
+        data['restored'] = True
+
+        if not _is_production_mode():
+            # DEV ONLY: mesma política de /wallet/new (chave para assinar localmente)
+            data['private_key_pem'] = wallet.private_key_pem
+
         return jsonify(data), 200
 
     @app.route('/balance/<address>', methods=['GET'])
