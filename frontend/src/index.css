@@ -4,22 +4,34 @@
 
 @layer base {
   body {
-    @apply bg-kur-bg text-kur-text font-sans antialiased;
+    @apply text-kur-text font-sans antialiased;
     min-height: 100vh;
+    background-color: #070b14;
+    /* Fundo "digital": brilhos radiais + trama (grid) fixa */
+    background-image:
+      radial-gradient(ellipse 70% 55% at 12% -8%, rgba(88, 166, 255, 0.14), transparent 60%),
+      radial-gradient(ellipse 65% 55% at 100% 0%, rgba(168, 85, 247, 0.14), transparent 55%),
+      radial-gradient(ellipse 60% 50% at 50% 120%, rgba(34, 211, 238, 0.10), transparent 60%),
+      linear-gradient(rgba(88, 166, 255, 0.045) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(88, 166, 255, 0.045) 1px, transparent 1px);
+    background-size: auto, auto, auto, 44px 44px, 44px 44px;
+    background-attachment: fixed;
   }
 
   ::-webkit-scrollbar {
-    width: 8px;
-    height: 8px;
+    width: 10px;
+    height: 10px;
   }
   ::-webkit-scrollbar-track {
-    @apply bg-kur-bg;
+    background: #070b14;
   }
   ::-webkit-scrollbar-thumb {
-    @apply bg-kur-border rounded;
+    background: linear-gradient(180deg, #243354, #1a2540);
+    border-radius: 999px;
+    border: 2px solid #070b14;
   }
   ::-webkit-scrollbar-thumb:hover {
-    @apply bg-gray-600;
+    background: linear-gradient(180deg, #58a6ff, #a855f7);
   }
 
   ::selection {
@@ -29,11 +41,15 @@
 
 @layer components {
   .card {
-    @apply bg-kur-bg-card border border-kur-border rounded-lg p-4;
+    @apply bg-kur-bg-card/80 border border-kur-border rounded-2xl p-4 backdrop-blur-sm shadow-card;
   }
 
   .card-hover {
-    @apply card transition-colors hover:bg-kur-bg-hover cursor-pointer;
+    @apply card transition-all duration-300 hover:border-kur-accent/50 hover:shadow-glow-sm hover:-translate-y-0.5 cursor-pointer;
+  }
+
+  .panel {
+    @apply bg-kur-bg-card/80 border border-kur-border rounded-2xl backdrop-blur-sm shadow-card;
   }
 
   .hash-display {
@@ -41,20 +57,26 @@
   }
 
   .input-field {
-    @apply bg-kur-bg border border-kur-border rounded px-3 py-2 text-sm
-           text-kur-text placeholder-kur-text-muted
-           focus:outline-none focus:border-kur-accent focus:ring-1 focus:ring-kur-accent/50
-           transition-colors;
+    @apply w-full bg-kur-bg/70 border border-kur-border rounded-xl px-3 py-2 text-sm
+           text-kur-text placeholder-kur-text-muted/70
+           focus:outline-none focus:border-kur-accent focus:shadow-glow-sm
+           transition-all;
   }
 
   .btn-primary {
-    @apply bg-kur-accent text-white px-4 py-2 rounded text-sm font-medium
-           hover:brightness-110 active:brightness-90 transition-all
-           disabled:opacity-50 disabled:cursor-not-allowed;
+    @apply inline-flex items-center justify-center gap-2 bg-kur-gradient text-white px-4 py-2 rounded-xl text-sm font-semibold
+           shadow-glow-sm hover:brightness-110 hover:shadow-glow active:brightness-90 transition-all
+           disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none;
+  }
+
+  .btn-outline {
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl text-sm font-medium
+           bg-kur-accent/10 text-kur-accent border border-kur-accent/30
+           hover:bg-kur-accent/20 hover:shadow-glow-sm transition-all;
   }
 
   .btn-ghost {
-    @apply text-kur-text-muted px-3 py-1.5 rounded text-sm
+    @apply inline-flex items-center gap-2 text-kur-text-muted px-3 py-1.5 rounded-xl text-sm
            hover:bg-kur-bg-hover hover:text-kur-text transition-colors;
   }
 
@@ -67,7 +89,7 @@
   }
 
   .sidebar-link {
-    @apply flex items-center gap-3 px-4 py-2.5 text-sm rounded-lg
+    @apply flex items-center gap-3 px-4 py-2.5 text-sm rounded-xl
            text-kur-text-muted hover:text-kur-text hover:bg-kur-bg-hover
            transition-colors;
   }
@@ -75,14 +97,25 @@
   .sidebar-link.active {
     @apply text-kur-accent bg-kur-accent/10;
   }
+
+  /* Texto com gradiente neon */
+  .neon-text {
+    @apply bg-clip-text text-transparent bg-gradient-to-r from-kur-cyan via-kur-accent to-kur-violet;
+  }
+
+  /* Chip/badge com brilho */
+  .badge {
+    @apply inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium
+           bg-kur-accent/10 text-kur-accent border border-kur-accent/20;
+  }
 }
 
 /* Skeleton loading */
 .skeleton {
-  background: linear-gradient(90deg, #161b22 25%, #1c2129 50%, #161b22 75%);
+  background: linear-gradient(90deg, #0f1626 25%, #1a2540 50%, #0f1626 75%);
   background-size: 200% 100%;
   animation: skeleton-shimmer 1.5s ease-in-out infinite;
-  border-radius: 8px;
+  border-radius: 12px;
 }
 
 @keyframes skeleton-shimmer {
@@ -115,4 +148,9 @@
 
 .animate-slide-in {
   animation: slide-in 0.3s ease-out;
+}
+
+/* Fade para as bordas do scroll horizontal (tabelas no mobile) */
+.scroll-fade {
+  mask-image: linear-gradient(to right, transparent 0, black 12px, black calc(100% - 12px), transparent 100%);
 }

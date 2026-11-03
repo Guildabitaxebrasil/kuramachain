@@ -217,7 +217,7 @@ function GraphCanvas({
       .attr('text-anchor', 'middle')
       .attr('dy', '0.35em')
       .attr('fill', '#e6edf3')
-      .attr('font-size', '11px')
+      .attr('font-size', '13px')
       .attr('font-family', 'monospace')
       .attr('font-weight', 'bold');
 
