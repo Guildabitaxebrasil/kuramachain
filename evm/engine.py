@@ -346,6 +346,16 @@ class EVMEngine:
     def _seal_locked(self, force: bool = False) -> Optional[int]:
         if not self._pending and not force:
             return None
+        timestamp = self._next_timestamp()
+        if timestamp is not None:
+            # Com o relógio fixo, o timestamp precisa entrar no header pendente
+            # ANTES das transações: o py-evm executa cada tx com
+            # `block.timestamp` desse header, que por padrão é
+            # `max(parent + 1, relógio de parede)`. Sem isto, o estado gravado
+            # pelos contratos (juros, TWAP, accrual) usava o relógio de parede
+            # enquanto o bloco selado usava o relógio determinístico — e o
+            # resultado variava conforme o tempo real de execução.
+            self._chain.set_header_timestamp(timestamp)
         # Esvazia a fila ANTES de aplicar: uma tx inválida (nonce, saldo, gas)
         # faz ``apply_transaction`` levantar e não pode ficar presa na fila
         # sendo reaplicada nos blocos seguintes.
@@ -357,7 +367,6 @@ class EVMEngine:
                 logger.warning('[EVM] transação descartada (%s): %s',
                                tx.hash.hex(), exc)
                 raise
-        timestamp = self._next_timestamp()
         if timestamp is None:
             self._chain.mine_block()
         else:
