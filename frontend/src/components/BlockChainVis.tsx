@@ -35,13 +35,13 @@ export default function BlockChainVis({ blocks, loading }: Props) {
               <Link
                 to={`/block/${block.index}`}
                 className={`
-                  w-24 h-24 rounded-lg border-2 flex flex-col items-center justify-center
-                  transition-all duration-200 hover:scale-105 hover:shadow-lg
+                  w-24 h-24 rounded-2xl border-2 flex flex-col items-center justify-center backdrop-blur-sm
+                  transition-all duration-200 hover:scale-105 hover:shadow-glow-sm
                   ${isGenesis
-                    ? 'border-kur-purple bg-kur-purple/5'
+                    ? 'border-kur-purple bg-kur-purple/5 shadow-glow-violet'
                     : isLatest
-                      ? 'border-kur-green bg-kur-green/5 shadow-kur-green/20 shadow-lg'
-                      : 'border-kur-border bg-kur-bg-card'
+                      ? 'border-kur-green bg-kur-green/5 shadow-glow-green'
+                      : 'border-kur-border bg-kur-bg-card/80'
                   }
                 `}
               >
@@ -61,8 +61,8 @@ export default function BlockChainVis({ blocks, loading }: Props) {
 
               {idx < blocks.length - 1 && (
                 <div className="flex items-center mx-2">
-                  <div className="w-6 h-[2px] bg-kur-border" />
-                  <div className="w-0 h-0 border-t-[5px] border-t-transparent border-b-[5px] border-b-transparent border-l-[8px] border-l-kur-border" />
+                  <div className="w-6 h-[2px] bg-gradient-to-r from-kur-border to-kur-accent/60" />
+                  <div className="w-0 h-0 border-t-[5px] border-t-transparent border-b-[5px] border-b-transparent border-l-[8px] border-l-kur-accent/60" />
                 </div>
               )}
             </div>

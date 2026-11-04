@@ -25,17 +25,15 @@ export default function Dashboard() {
   if (isLoading) {
     return (
       <div className="max-w-full overflow-x-hidden">
-        <h1 className="text-xl sm:text-2xl font-bold text-kur-text mb-4 sm:mb-6">Dashboard</h1>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+        <h1 className="text-xl sm:text-2xl font-bold neon-text mb-4 sm:mb-6">Dashboard</h1>          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mb-8">
           {[1,2,3,4].map(i => (
-            <div key={i} className="bg-kur-bg-card border border-kur-border rounded-xl p-5 animate-pulse">
+            <div key={i} className="panel p-5 animate-pulse">
               <div className="h-4 w-24 bg-kur-bg-hover rounded mb-3" />
               <div className="h-8 w-20 bg-kur-bg-hover rounded" />
             </div>
           ))}
         </div>
-        <div className="bg-kur-bg-card border border-kur-border rounded-xl p-5 animate-pulse">
-          <div className="h-[300px] bg-kur-bg-hover rounded" />
+        <div className="bg-kur-bg-card border border-kur-border rounded-xl p-5 animate-pulse">            <div className="h-[260px] sm:h-[300px] bg-kur-bg-hover rounded-xl" />
         </div>
       </div>
     );
@@ -61,7 +59,7 @@ export default function Dashboard() {
 
   return (
     <div className="max-w-full overflow-x-hidden">
-      <h1 className="text-xl sm:text-2xl font-bold text-kur-text mb-4 sm:mb-6">Dashboard</h1>
+      <h1 className="text-xl sm:text-2xl font-bold neon-text mb-4 sm:mb-6">Dashboard</h1>
 
       <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mb-4">
         <StatCard title="Blocos" value={s.blocks ?? 0} icon="📦" accent="text-kur-accent" />
@@ -71,7 +69,7 @@ export default function Dashboard() {
       </div>
 
       {/* Supply progress bar */}
-      <div className="bg-kur-bg-card border border-kur-border rounded-xl p-3 sm:p-4 mb-6">
+      <div className="panel p-3 sm:p-4 mb-6">
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-1 mb-2">
           <span className="text-xs sm:text-sm text-kur-text-muted">
             {s.token_name || 'Kurama'} ({s.token_symbol || 'KUR'}) — Fornecimento
@@ -97,10 +95,10 @@ export default function Dashboard() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6 mb-6">
-        <div className="lg:col-span-2 bg-kur-bg-card border border-kur-border rounded-xl p-3 sm:p-5 overflow-x-auto">
+        <div className="lg:col-span-2 panel p-3 sm:p-5 overflow-x-auto">
           <h2 className="text-base sm:text-lg font-semibold text-kur-text mb-3 sm:mb-4">📈 Crescimento da Blockchain</h2>
           {chartData.length > 0 ? (
-            <div className="min-w-[400px] sm:min-w-0">
+            <div className="w-full">
               <ChainGrowthChart data={chartData} loading={chartLoading} />
             </div>
           ) : (
@@ -108,13 +106,13 @@ export default function Dashboard() {
           )}
         </div>
 
-        <div className="bg-kur-bg-card border border-kur-border rounded-xl p-3 sm:p-5">
+        <div className="panel p-3 sm:p-5">
           <h2 className="text-base sm:text-lg font-semibold text-kur-text mb-3 sm:mb-4">🔄 Mempool</h2>
           <MempoolWidget stats={mempool} loading={mempoolLoading} />
         </div>
       </div>
 
-      <div className="bg-kur-bg-card border border-kur-border rounded-xl p-5">
+      <div className="panel p-5">
         <h2 className="text-lg font-semibold text-kur-text mb-4">🔗 Blocos Recentes</h2>
         {recentBlocks.length === 0 ? (
           <p className="text-kur-text-muted text-sm py-6 text-center">

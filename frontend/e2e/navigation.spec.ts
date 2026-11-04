@@ -77,7 +77,8 @@ test.describe('Navegacao Geral', () => {
     await expect(page.locator('text=Kurama Chain').first()).toBeVisible();
 
     // Fecha clicando no backdrop
-    await page.locator('.fixed.inset-0.bg-black\/50').first().click();
+    // Clica no backdrop fora da sidebar (a sidebar ocupa os 256px da esquerda)
+    await page.locator('div[class*="bg-black/50"]').first().click({ position: { x: 330, y: 300 } });
     await page.waitForTimeout(300);
   });
 });

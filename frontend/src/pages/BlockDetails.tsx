@@ -41,7 +41,7 @@ export default function BlockDetails() {
     return (
       <div>
         <div className="skeleton h-8 w-48 mb-6" />
-        <div className="bg-kur-bg-card border border-kur-border rounded-xl p-6">
+        <div className="panel p-6">
           {Array.from({ length: 7 }).map((_, i) => (
             <div key={i} className="skeleton h-5 w-full mb-4 last:mb-0" />
           ))}
@@ -55,8 +55,7 @@ export default function BlockDetails() {
       <div className="flex flex-col items-center py-20">
         <p className="text-kur-red text-lg mb-2">Bloco não encontrado</p>
         <p className="text-kur-text-muted text-sm mb-6">{error}</p>
-        <Link to="/blocks"
-          className="px-6 py-2 bg-kur-accent/10 text-kur-accent border border-kur-accent/30 rounded-lg hover:bg-kur-accent/20">
+        <Link to="/blocks" className="btn-outline">
           ← Voltar para Explorer
         </Link>
       </div>
@@ -74,7 +73,7 @@ export default function BlockDetails() {
         <Link to="/blocks" className="text-kur-text-muted hover:text-kur-text transition-colors">
           ← Blocos
         </Link>
-        <h1 className="text-2xl font-bold text-kur-text">Bloco #{block.index}</h1>
+        <h1 className="text-xl sm:text-2xl font-bold neon-text">Bloco #{block.index}</h1>
         {prevIndex !== null && (
           <Link to={`/block/${prevIndex}`}
             className="text-sm text-kur-accent hover:underline ml-auto">
@@ -83,7 +82,7 @@ export default function BlockDetails() {
         )}
       </div>
 
-      <div className="bg-kur-bg-card border border-kur-border rounded-xl p-6 mb-6">
+      <div className="panel p-4 sm:p-6 mb-6">
         <h2 className="text-lg font-semibold text-kur-text mb-4">Informações do Bloco</h2>
         <FieldRow label="Hash do Bloco" value={block.hash} link={`/block/${block.hash}`} />
         <FieldRow label="Previous Hash" value={block.previous_hash} link={block.previous_hash ? `/block/${block.previous_hash}` : ''} />
@@ -94,7 +93,7 @@ export default function BlockDetails() {
         <FieldRow label="Transações" value={String(txs.length)} mono={false} />
       </div>
 
-      <div className="bg-kur-bg-card border border-kur-border rounded-xl p-6">
+      <div className="panel p-4 sm:p-6">
         <h2 className="text-lg font-semibold text-kur-text mb-4">
           Transações ({txs.length})
         </h2>

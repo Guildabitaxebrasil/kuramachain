@@ -89,7 +89,7 @@ export default function SendTransaction({ isOpen, onClose, onSuccess, onError }:
       onClick={handleOverlayClick}
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
     >
-      <div className="bg-kur-bg-card border border-kur-border rounded-2xl w-full max-w-lg shadow-2xl">
+      <div className="bg-kur-bg-card/95 backdrop-blur-xl border border-kur-border rounded-2xl w-full max-w-lg shadow-2xl shadow-glow-sm">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-kur-border">
           <div className="flex items-center gap-2">
@@ -144,13 +144,13 @@ export default function SendTransaction({ isOpen, onClose, onSuccess, onError }:
                 onChange={e => setCustomPk(e.target.value)}
                 placeholder="Cole a chave privada (PEM)..."
                 rows={3}
-                className="w-full bg-kur-bg border border-kur-border rounded-lg px-3 py-2 text-xs font-mono text-kur-text placeholder-kur-text-muted focus:outline-none focus:border-kur-accent resize-none"
+                className="w-full bg-kur-bg border border-kur-border rounded-lg px-3 py-2 text-xs font-mono text-kur-text placeholder-kur-text-muted focus:outline-none focus:border-kur-accent focus:shadow-glow-sm resize-none"
               />
             ) : wallets.length > 0 ? (
               <select
                 value={selectedWallet}
                 onChange={e => setSelectedWallet(e.target.value)}
-                className="w-full bg-kur-bg border border-kur-border rounded-lg px-3 py-2.5 text-sm text-kur-text focus:outline-none focus:border-kur-accent"
+                className="w-full bg-kur-bg border border-kur-border rounded-lg px-3 py-2.5 text-sm text-kur-text focus:outline-none focus:border-kur-accent focus:shadow-glow-sm"
               >
                 <option value="">Selecione uma carteira...</option>
                 {wallets.map(w => (
@@ -175,7 +175,7 @@ export default function SendTransaction({ isOpen, onClose, onSuccess, onError }:
               value={receiver}
               onChange={e => setReceiver(e.target.value)}
               placeholder="Endereço da carteira de destino..."
-              className="w-full bg-kur-bg border border-kur-border rounded-lg px-3 py-2.5 text-sm font-mono text-kur-text placeholder-kur-text-muted focus:outline-none focus:border-kur-accent"
+              className="w-full bg-kur-bg border border-kur-border rounded-lg px-3 py-2.5 text-sm font-mono text-kur-text placeholder-kur-text-muted focus:outline-none focus:border-kur-accent focus:shadow-glow-sm"
             />
             {isEvmReceiver && (
               <p className="mt-1.5 text-xs text-kur-text-muted">
@@ -198,7 +198,7 @@ export default function SendTransaction({ isOpen, onClose, onSuccess, onError }:
                 value={amount}
                 onChange={e => setAmount(e.target.value)}
                 placeholder="10.0"
-                className="w-full bg-kur-bg border border-kur-border rounded-lg px-3 py-2.5 text-sm font-mono text-kur-text placeholder-kur-text-muted focus:outline-none focus:border-kur-accent"
+                className="w-full bg-kur-bg border border-kur-border rounded-lg px-3 py-2.5 text-sm font-mono text-kur-text placeholder-kur-text-muted focus:outline-none focus:border-kur-accent focus:shadow-glow-sm"
               />
             </div>
             <div>
@@ -211,7 +211,7 @@ export default function SendTransaction({ isOpen, onClose, onSuccess, onError }:
                 min="0.001"
                 value={fee}
                 onChange={e => setFee(e.target.value)}
-                className="w-full bg-kur-bg border border-kur-border rounded-lg px-3 py-2.5 text-sm font-mono text-kur-text placeholder-kur-text-muted focus:outline-none focus:border-kur-accent"
+                className="w-full bg-kur-bg border border-kur-border rounded-lg px-3 py-2.5 text-sm font-mono text-kur-text placeholder-kur-text-muted focus:outline-none focus:border-kur-accent focus:shadow-glow-sm"
               />
             </div>
           </div>
@@ -229,7 +229,7 @@ export default function SendTransaction({ isOpen, onClose, onSuccess, onError }:
           <button
             onClick={handleSend}
             disabled={sending}
-            className="px-6 py-2.5 bg-kur-accent text-white rounded-lg hover:bg-kur-accent/90 transition-colors text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+            className="px-6 py-2.5 bg-kur-gradient text-white rounded-xl font-semibold shadow-glow-sm hover:brightness-110 transition-all text-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
           >
             {sending ? (
               <>

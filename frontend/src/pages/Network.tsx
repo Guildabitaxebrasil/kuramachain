@@ -17,8 +17,7 @@ export default function Network() {
       <div className="flex flex-col items-center py-20">
         <p className="text-kur-red text-lg mb-4">Erro ao carregar rede</p>
         <p className="text-kur-text-muted text-sm mb-6">{error}</p>
-        <button onClick={refresh}
-          className="px-6 py-2 bg-kur-accent/10 text-kur-accent border border-kur-accent/30 rounded-lg hover:bg-kur-accent/20 transition-colors">
+        <button onClick={refresh} className="btn-outline">
           Tentar novamente
         </button>
       </div>
@@ -34,7 +33,7 @@ export default function Network() {
     <div className="max-w-6xl mx-auto space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-kur-text">Visão da Rede</h1>
+          <h1 className="text-xl sm:text-2xl font-bold neon-text">Visão da Rede</h1>
           <p className="text-sm text-kur-text-muted mt-1">{total} nós na rede</p>
         </div>
         <div className="flex items-center gap-2 text-sm text-kur-accent">
@@ -43,17 +42,17 @@ export default function Network() {
         </div>
       </div>
 
-      <div className="bg-kur-bg-card border border-kur-border rounded-xl p-6">
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
-          <div className="text-center p-4 rounded-lg bg-kur-bg/50">
+      <div className="panel p-4 sm:p-6">
+        <div className="grid grid-cols-3 gap-3 sm:gap-4">
+          <div className="text-center p-3 sm:p-4 rounded-xl bg-kur-bg-hover/40 border border-kur-border">
             <p className="text-kur-text-muted text-xs uppercase tracking-wider">Total</p>
             <p className="text-2xl font-bold text-kur-text mt-1">{total}</p>
           </div>
-          <div className="text-center p-4 rounded-lg bg-kur-bg/50">
+          <div className="text-center p-3 sm:p-4 rounded-xl bg-kur-bg-hover/40 border border-kur-border">
             <p className="text-kur-text-muted text-xs uppercase tracking-wider">Ativos</p>
             <p className="text-2xl font-bold text-kur-green mt-1">{active}</p>
           </div>
-          <div className="text-center p-4 rounded-lg bg-kur-bg/50">
+          <div className="text-center p-3 sm:p-4 rounded-xl bg-kur-bg-hover/40 border border-kur-border">
             <p className="text-kur-text-muted text-xs uppercase tracking-wider">Inativos</p>
             <p className="text-2xl font-bold text-kur-red mt-1">{inactive}</p>
           </div>
@@ -61,7 +60,7 @@ export default function Network() {
       </div>
 
       {nodeList.length === 0 ? (
-        <div className="bg-kur-bg-card border border-kur-border rounded-xl p-16 text-center">
+        <div className="panel p-12 sm:p-16 text-center">
           <p className="text-4xl mb-4">🌐</p>
           <p className="text-kur-text-muted text-lg">Nenhum nó conectado</p>
           <p className="text-kur-text-muted text-sm mt-2">
@@ -69,8 +68,8 @@ export default function Network() {
           </p>
         </div>
       ) : (
-        <div className="bg-kur-bg-card border border-kur-border rounded-xl overflow-hidden">
-          <table className="w-full">
+        <div className="panel overflow-hidden overflow-x-auto scroll-fade">
+          <table className="w-full min-w-[640px]">
             <thead>
               <tr className="border-b border-kur-border">
                 <th className="py-3 px-4 text-left text-xs font-medium text-kur-text-muted uppercase tracking-wider">Nó</th>

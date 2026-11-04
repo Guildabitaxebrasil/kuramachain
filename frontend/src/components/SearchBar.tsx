@@ -68,7 +68,7 @@ export default function SearchBar() {
           onChange={(e) => setQuery(e.target.value)}
           onFocus={() => { if (query.length >= 2) setOpen(true); }}
           placeholder="Buscar blocos, transações ou endereços..."
-          className="w-full pl-10 pr-4 py-2 text-sm bg-kur-bg border border-kur-border rounded-lg text-kur-text placeholder-kur-text-muted focus:outline-none focus:border-kur-accent focus:ring-1 focus:ring-kur-accent/50 transition-colors"
+          className="w-full pl-10 pr-4 py-2 text-sm bg-kur-bg/70 border border-kur-border rounded-xl text-kur-text placeholder-kur-text-muted focus:outline-none focus:border-kur-accent focus:ring-1 focus:ring-kur-accent/50 focus:shadow-glow-sm transition-all"
         />
         {loading && (
           <div className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 border-2 border-kur-border border-t-kur-accent rounded-full animate-spin" />
@@ -76,7 +76,7 @@ export default function SearchBar() {
       </div>
 
       {open && (
-        <div ref={dropdownRef} className="absolute top-full left-0 right-0 mt-2 bg-kur-bg-card border border-kur-border rounded-xl shadow-2xl shadow-black/40 overflow-hidden z-50 max-h-96 overflow-y-auto">
+        <div ref={dropdownRef} className="absolute top-full left-0 right-0 mt-2 bg-kur-bg-card/95 backdrop-blur-xl border border-kur-border rounded-2xl shadow-2xl shadow-glow-sm overflow-hidden z-50 max-h-96 overflow-y-auto">
           {!hasResults ? (
             <div className="p-6 text-center text-sm text-kur-text-muted">
               {loading ? 'Buscando...' : query.length < 2 ? 'Digite pelo menos 2 caracteres' : 'Nenhum resultado encontrado'}

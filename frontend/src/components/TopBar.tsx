@@ -1,4 +1,5 @@
 import { useState, useCallback } from 'react';
+import { Link } from 'react-router-dom';
 import SearchBar from './SearchBar';
 import SendTransaction from './SendTransaction';
 import ConnectWallet from './ConnectWallet';
@@ -18,11 +19,11 @@ export default function TopBar({ onToggleSidebar }: Props) {
 
   return (
     <>
-      <header className="h-16 bg-kur-bg-card border-b border-kur-border px-4 lg:px-6 flex items-center gap-3 sticky top-0 z-10">
+      <header className="h-16 bg-kur-bg-card/70 backdrop-blur-xl border-b border-kur-border px-3 sm:px-4 lg:px-6 flex items-center gap-2 sm:gap-3 sticky top-0 z-10">
         {/* Mobile hamburger */}
         <button
           onClick={onToggleSidebar}
-          className="lg:hidden p-2 rounded-lg text-kur-text-muted hover:text-kur-text hover:bg-kur-bg-hover transition-colors"
+          className="lg:hidden p-2 rounded-xl text-kur-text-muted hover:text-kur-text hover:bg-kur-bg-hover transition-colors"
           aria-label="Toggle sidebar"
         >
           <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -30,20 +31,26 @@ export default function TopBar({ onToggleSidebar }: Props) {
           </svg>
         </button>
 
+        {/* Mobile brand (sidebar fica oculta no mobile) */}
+        <Link to="/" className="lg:hidden flex items-center gap-2 shrink-0">
+          <img src="/kurama.jpg" alt="Kurama Chain" className="w-8 h-8 rounded-lg object-cover ring-1 ring-kur-accent/40" />
+          <span className="hidden sm:inline text-sm font-bold neon-text whitespace-nowrap">Kurama Chain</span>
+        </Link>
+
         {/* Search */}
-        <div className="flex-1 max-w-xl">
+        <div className="flex-1 min-w-0 max-w-xl">
           <SearchBar />
         </div>
 
         {/* Action Buttons */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 shrink-0">
           {/* Connect Wallet */}
           <ConnectWallet />
 
           {/* Send Transaction */}
           <button
             onClick={() => setShowSendModal(true)}
-            className="hidden sm:flex items-center gap-1.5 px-3 py-2 bg-kur-accent/10 text-kur-accent border border-kur-accent/30 rounded-lg hover:bg-kur-accent/20 transition-colors text-xs font-medium"
+            className="hidden sm:flex items-center gap-1.5 px-3 py-2 bg-kur-accent/10 text-kur-accent border border-kur-accent/30 rounded-xl hover:bg-kur-accent/20 hover:shadow-glow-sm transition-all text-xs font-medium"
           >
             <span>💸</span>
             <span className="hidden md:inline">Enviar</span>
@@ -51,8 +58,8 @@ export default function TopBar({ onToggleSidebar }: Props) {
         </div>
 
         {/* Live indicator */}
-        <div className="flex items-center gap-2 text-xs text-kur-green">
-          <span className="w-2 h-2 rounded-full bg-kur-green animate-pulse" />
+        <div className="flex items-center gap-2 text-xs text-kur-green shrink-0">
+          <span className="w-2 h-2 rounded-full bg-kur-green animate-pulse shadow-glow-green" />
           <span className="hidden sm:inline">Live</span>
         </div>
       </header>
@@ -68,7 +75,7 @@ export default function TopBar({ onToggleSidebar }: Props) {
       {/* Toast notification */}
       {toast && (
         <div
-          className={`fixed top-20 right-4 z-50 px-4 py-3 rounded-xl shadow-lg border text-sm max-w-md animate-slide-in ${
+          className={`fixed top-20 right-4 z-50 px-4 py-3 rounded-xl shadow-lg border text-sm max-w-md animate-slide-in backdrop-blur-xl ${
             toast.type === 'success'
               ? 'bg-kur-green/10 border-kur-green/30 text-kur-green'
               : 'bg-kur-red/10 border-kur-red/30 text-kur-red'

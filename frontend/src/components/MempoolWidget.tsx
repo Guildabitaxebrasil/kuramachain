@@ -17,9 +17,9 @@ export default function MempoolWidget({ stats, loading }: Props) {
   if (loading) {
     return (
       <div className="animate-pulse space-y-3">
-        <div className="h-16 bg-kur-bg-card rounded-lg" />
-        <div className="h-10 bg-kur-bg-card rounded-lg" />
-        <div className="h-10 bg-kur-bg-card rounded-lg" />
+        <div className="h-16 bg-kur-bg-hover/60 rounded-xl" />
+        <div className="h-14 bg-kur-bg-hover/60 rounded-xl" />
+        <div className="h-14 bg-kur-bg-hover/60 rounded-xl" />
       </div>
     );
   }
@@ -35,7 +35,8 @@ export default function MempoolWidget({ stats, loading }: Props) {
 
   return (
     <div className="space-y-3">
-      <div className="text-center">
+      <div className="relative text-center rounded-2xl bg-kur-bg-hover/40 border border-kur-border py-4 overflow-hidden">
+        <span className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-kur-yellow/60 to-transparent" />
         <p className="text-4xl font-bold text-kur-yellow font-mono">{stats.total}</p>
         <p className="text-xs text-kur-text-muted mt-1">Transações Pendentes</p>
         {(stats.total_fees ?? 0) > 0 && (
@@ -46,19 +47,19 @@ export default function MempoolWidget({ stats, loading }: Props) {
       </div>
 
       <div className="grid grid-cols-2 gap-3 text-sm">
-        <div className="bg-kur-bg rounded-lg p-3">
+        <div className="bg-kur-bg-hover/40 border border-kur-border rounded-xl p-3">
           <p className="text-kur-text-muted text-xs mb-1">Mínimo</p>
           <p className="text-kur-text font-mono font-medium">{stats.min_value.toFixed(2)}</p>
         </div>
-        <div className="bg-kur-bg rounded-lg p-3">
+        <div className="bg-kur-bg-hover/40 border border-kur-border rounded-xl p-3">
           <p className="text-kur-text-muted text-xs mb-1">Máximo</p>
           <p className="text-kur-text font-mono font-medium">{stats.max_value.toFixed(2)}</p>
         </div>
-        <div className="bg-kur-bg rounded-lg p-3">
+        <div className="bg-kur-bg-hover/40 border border-kur-border rounded-xl p-3">
           <p className="text-kur-text-muted text-xs mb-1">Média</p>
           <p className="text-kur-text font-mono font-medium">{stats.avg_value.toFixed(2)}</p>
         </div>
-        <div className="bg-kur-bg rounded-lg p-3">
+        <div className="bg-kur-bg-hover/40 border border-kur-border rounded-xl p-3">
           <p className="text-kur-text-muted text-xs mb-1">Mais Antiga</p>
           <p className="text-kur-text font-mono font-medium text-xs">{formatAge(stats.oldest_tx)}</p>
         </div>
