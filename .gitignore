@@ -38,6 +38,12 @@ python-embed/
 # Build artifacts
 ts_errors.txt
 ts_out.txt
+ts_errors*.txt
+build_check.txt
+
+# Playwright (relatórios e traces são gerados a cada execução)
+frontend/test-results/
+frontend/playwright-report/
 
 # Logs
 *.log
