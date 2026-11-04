@@ -449,6 +449,15 @@ def run_interactive(args):
                 print("\n[WARN]  Crie uma carteira primeiro para receber a recompensa.")
                 continue
 
+            # Ritmo de blocos: um bloco a cada 10 min, como na API.
+            wait = blockchain.seconds_until_next_block()
+            if wait > 0:
+                from config import TARGET_BLOCK_TIME
+                print(f"\n[WAIT] Próximo bloco só em {wait / 60:.1f} min. "
+                      f"A recompensa ({blockchain.reward:.0f} KUR) é paga "
+                      f"uma vez a cada {TARGET_BLOCK_TIME / 60:.0f} min.")
+                continue
+
             # Usa a primeira carteira como minerador
             miner = list(wallets.values())[0]
             block = blockchain.mine_block(miner.address)
@@ -579,24 +588,24 @@ def run_demo(args):
     # ─── 4. TRANSAÇÕES ───────────────────────────────────────────
     print("[4] CRIANDO TRANSAÇÕES")
     print("-" * 40)
-    # Minerador envia 30 coins para Alice (ele recebeu a recompensa)
+    # Minerador envia 5 coins para Alice (ele recebeu a recompensa)
     # O minerador usa sua chave privada para assinar a transação
-    tx_miner_alice = miner.create_transaction(alice.address, 30.0)
+    tx_miner_alice = miner.create_transaction(alice.address, 5.0)
     blockchain.pending_transactions.append(tx_miner_alice)
-    print(f"   [OK] Minerador → Alice: 30.0 coins")
+    print(f"   [OK] Minerador → Alice: 5.0 coins")
     print(f"      ID: {tx_miner_alice.transaction_id[:20]}...")
 
     # Alice envia 15 coins para Bob (ela recebeu 30 do minerador)
-    tx1 = alice.create_transaction(bob.address, 15.0)
+    tx1 = alice.create_transaction(bob.address, 2.0)
     blockchain.pending_transactions.append(tx1)
-    print(f"   [OK] Alice → Bob: 15.0 coins")
+    print(f"   [OK] Alice → Bob: 2.0 coins")
     print(f"      ID: {tx1.transaction_id[:20]}...")
     print(f"      Assinatura: {tx1.signature[:20] if tx1.signature else 'N/A'}...")
 
     # Alice envia 5 coins para o minerador
-    tx2 = alice.create_transaction(miner.address, 5.0)
+    tx2 = alice.create_transaction(miner.address, 1.0)
     blockchain.pending_transactions.append(tx2)
-    print(f"   [OK] Alice → Minerador: 5.0 coins")
+    print(f"   [OK] Alice → Minerador: 1.0 coins")
     print()
 
     # ─── 5. VALIDAÇÃO DE ASSINATURA ──────────────────────────────
@@ -630,12 +639,16 @@ def run_demo(args):
     alice_bal = blockchain.get_balance(alice.address)
     bob_bal = blockchain.get_balance(bob.address)
     miner_bal = blockchain.get_balance(miner.address)
-    # Alice: 30 recebidos - 15 (Bob) - 5 (Minerador) = 10
-    assert abs(alice_bal - 10.0) < 0.001, f"Alice balance mismatch: {alice_bal}"
-    # Bob: 15 recebidos
-    assert abs(bob_bal - 15.0) < 0.001, f"Bob balance mismatch: {bob_bal}"
-    # Minerador: 50 (bloco 1) + 50 (bloco 2) + 5 (Alice) - 30 (enviado Alice) = 75
-    assert abs(miner_bal - 75.0) < 0.001, f"Minerador balance mismatch: {miner_bal}"
+    # Recompensa por bloco (10 KUR): o esperado sai da config, não de número fixo.
+    reward = blockchain.get_block_reward(1)
+    # Alice: 5 recebidos - 2 (Bob) - 1 (Minerador) = 2
+    assert abs(alice_bal - 2.0) < 0.001, f"Alice balance mismatch: {alice_bal}"
+    # Bob: 2 recebidos
+    assert abs(bob_bal - 2.0) < 0.001, f"Bob balance mismatch: {bob_bal}"
+    # Minerador: reward (bloco 1) + reward (bloco 2) - 5 (enviado) + 1 (Alice)
+    expected_miner = 2 * reward - 5.0 + 1.0
+    assert abs(miner_bal - expected_miner) < 0.001, (
+        f"Minerador balance mismatch: {miner_bal} (esperado {expected_miner})")
     print(f"\n   [OK] Saldos verificados e consistentes!")
     print()
 

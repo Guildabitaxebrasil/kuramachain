@@ -374,13 +374,13 @@ class TestBlockchain(unittest.TestCase):
         alice = Wallet()
         miner = Wallet()
 
-        # Bloco 1: apenas recompensa de mineração (2500 KUR para miner)
+        # Bloco 1: apenas recompensa de mineração (10 KUR para miner)
         dummy = Wallet()
         tx = dummy.create_transaction(miner.address, 1.0)
         self.bc.pending_transactions.append(tx)
         self.bc.mine_block(miner.address)
 
-        # Miner agora tem 2500 KUR (coinbase) + 1 KUR (recebido do dummy)
+        # Miner agora tem 10 KUR (coinbase) + 1 KUR (recebido do dummy)
         miner_balance = self.bc.get_balance(miner.address)
         self.assertEqual(miner_balance, self.bc.get_block_reward(1) + 1.0)
 
@@ -389,7 +389,7 @@ class TestBlockchain(unittest.TestCase):
         self.bc.pending_transactions.append(tx)
         self.bc.mine_block(miner.address)
 
-        # Miner: 2500 (bloco1) + 2500 (bloco2) - 500 (enviado) = 4500
+        # Miner: 10 (bloco1) + 10 (bloco2) - 500 (enviado) = -480
         miner_balance = self.bc.get_balance(miner.address)
         expected_miner = 2 * self.bc.get_block_reward(1) + 1.0 - 500.0
         self.assertEqual(miner_balance, expected_miner)
@@ -536,14 +536,14 @@ class TestBlockchain(unittest.TestCase):
     def test_halving_reward(self):
         """Recompensa de bloco deve reduzir pela metade a cada halving."""
         bc = Blockchain(difficulty=2)
-        # Bloco 1 (primeiro após gênese): reward inicial
-        self.assertEqual(bc.get_block_reward(1), 2500.0)
+        # Bloco 1 (primeiro após gênese): reward inicial de 10 KUR
+        self.assertEqual(bc.get_block_reward(1), 10.0)
         # Bloco 200000: ainda no primeiro período de halving
-        self.assertEqual(bc.get_block_reward(200_000), 2500.0)
-        # Bloco 200001: primeiro halving → 1250
-        self.assertEqual(bc.get_block_reward(200_001), 1250.0)
-        # Bloco 400001: segundo halving → 625
-        self.assertEqual(bc.get_block_reward(400_001), 625.0)
+        self.assertEqual(bc.get_block_reward(200_000), 10.0)
+        # Bloco 200001: primeiro halving → 5
+        self.assertEqual(bc.get_block_reward(200_001), 5.0)
+        # Bloco 400001: segundo halving → 2.5
+        self.assertEqual(bc.get_block_reward(400_001), 2.5)
         # Bloco 0 (gênese): sem recompensa
         self.assertEqual(bc.get_block_reward(0), 0.0)
         # Após muitos halvings: tende a 0
@@ -608,7 +608,7 @@ class TestBlockchain(unittest.TestCase):
         self.bc.pending_transactions.append(tx)
         self.bc.mine_block(miner.address)
 
-        # Miner: saldo anterior + coinbase #2 (2500) - 100 enviado
+        # Miner: saldo anterior + coinbase #2 (10) - 100 enviado
         expected = miner_balance_before + self.bc.get_block_reward(2) - 100.0
         self.assertEqual(self.bc.get_balance(miner.address), expected)
 
@@ -751,13 +751,13 @@ class TestFullIntegration(unittest.TestCase):
         tx = dummy.create_transaction(miner.address, 1.0)
         bc.pending_transactions.append(tx)
         bc.mine_block(miner.address)
-        # Minerador: +2500 KUR (coinbase)
+        # Minerador: +10 KUR (coinbase)
 
         # 3. Minerador envia 1000 KUR para Alice
         tx = miner.create_transaction(alice.address, 1000.0)
         bc.pending_transactions.append(tx)
         bc.mine_block(miner.address)
-        # Minerador: +2500 (coinbase bloco2) - 1000 (enviou pra Alice) = 4000 total
+        # Minerador: +10 (coinbase bloco2) - 1000 (enviou pra Alice) = -990 total
         # Alice: +1000
 
         # 4. Alice envia para Bob
@@ -776,9 +776,9 @@ class TestFullIntegration(unittest.TestCase):
         self.assertEqual(bc.get_balance(alice.address), 500.0)
         # Bob: +300
         self.assertEqual(bc.get_balance(bob.address), 300.0)
-        # Minerador: 2500+2500+2500 (3 coinbases) -1000 (enviou) -1 (dummy)
+        # Minerador: 10+10+10 (3 coinbases) -1000 (enviou) -1 (dummy)
         #           +1 (dummy) +300 (bob tx não, da alice) +200 (alice)
-        # = 7500 - 1000 + 200 + 1 = 6701
+        # = 30 - 1000 + 200 + 1 = -769
         expected_miner = 3 * bc.get_block_reward(1) + 1.0 - 1000.0 + 200.0
         self.assertEqual(bc.get_balance(miner.address), expected_miner)
 

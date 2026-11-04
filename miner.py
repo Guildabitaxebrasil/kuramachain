@@ -8,9 +8,10 @@ exigido pela dificuldade. Quando acha, entrega o bloco pronto
 (`POST /mining/submit`) e recomeça no próximo bloco. O nó só valida —
 quem faz o trabalho é este processo.
 
-Não há intervalo nem "próximo bloco agendado": igual ao Bitcoin, você
-mina sem parar e a dificuldade (que o nó reajusta mirando 10 minutos por
-bloco) é quem controla o ritmo.
+O ritmo é do nó, não do minerador: depois de cada bloco aceito o minerador
+pede o próximo template e o nó responde 429 com `retry_after` até o
+intervalo alvo (10 minutos) passar. O minerador dorme esse tempo e volta a
+minerar — nada de martelar o nó a cada segundo.
 
 Uso:
     # Terminal 1 — o nó
@@ -66,9 +67,12 @@ HEX_DIGITS = '0123456789abcdef'
 class MinerError(RuntimeError):
     """Erro de comunicação ou de regra do nó."""
 
-    def __init__(self, message: str, status: int = None):
+    def __init__(self, message: str, status: int = None,
+                 retry_after: float = None):
         super().__init__(message)
         self.status = status
+        # Segundos que o nó pediu para esperar (429 de ritmo de blocos).
+        self.retry_after = retry_after
 
     @property
     def retryable(self) -> bool:
@@ -224,13 +228,17 @@ class NodeClient:
 
         if response.status_code >= 400:
             detail = ''
+            retry_after = None
             try:
-                detail = response.json().get('error', '')
-            except ValueError:
+                payload = response.json()
+                detail = payload.get('error', '')
+                retry_after = payload.get('retry_after')
+            except (ValueError, AttributeError):
                 detail = response.text[:200]
             raise MinerError(
                 f'{method} {path} → HTTP {response.status_code}: {detail}',
                 status=response.status_code,
+                retry_after=float(retry_after) if retry_after else None,
             )
 
         try:
@@ -300,9 +308,12 @@ def mine_forever(client: NodeClient, address: str = None,
         except MinerError as exc:
             if not exc.retryable:
                 raise
+            # 429 de ritmo de blocos: o nó diz quanto falta para o próximo
+            # bloco. Dormir esse tempo é o que evita minerar a cada segundo.
+            wait = exc.retry_after if exc.retry_after else RETRY_SECONDS
             out(f'[WARN] {exc}')
-            out(f'[WAIT] Nova tentativa em {RETRY_SECONDS:.0f}s...')
-            sleep(RETRY_SECONDS)
+            out(f'[WAIT] Aguardando {wait:.0f}s para o próximo bloco...')
+            sleep(wait)
             continue
 
         pending = max(len(template.get('transactions', [])) - 1, 0)
@@ -323,9 +334,12 @@ def mine_forever(client: NodeClient, address: str = None,
                 continue
             if not exc.retryable:
                 raise
+            # Template velho demais / ritmo de blocos: descarta o bloco e
+            # pede um novo quando o nó liberar.
+            wait = exc.retry_after if exc.retry_after else RETRY_SECONDS
             out(f'[WARN] {exc}')
-            out(f'[WAIT] Nova tentativa em {RETRY_SECONDS:.0f}s...')
-            sleep(RETRY_SECONDS)
+            out(f'[WAIT] Aguardando {wait:.0f}s para o próximo bloco...')
+            sleep(wait)
             continue
 
         block = result.get('block') or {}

@@ -430,10 +430,12 @@ class Blockchain:
         Calcula a recompensa de bloco considerando o halving.
 
         A cada HALVING_INTERVAL blocos, a recompensa é reduzida pela
-        metade. Bloco 1 (primeiro após gênese) recebe reward inicial.
+        metade. Bloco 1 (primeiro após gênese) recebe a recompensa inicial
+        (10 KUR), paga uma vez a cada bloco — e o nó só aceita um bloco a
+        cada TARGET_BLOCK_TIME (10 min).
         Gênese (índice 0) não recebe recompensa.
 
-        Ex: 2500 → 1250 → 625 → 312.5 → ...
+        Ex: 10 → 5 → 2.5 → 1.25 → ...
 
         Args:
             block_index: Índice do bloco (0 = gênese)
@@ -602,6 +604,30 @@ class Blockchain:
     def last_block(self) -> Optional[Block]:
         """Retorna o último bloco da cadeia."""
         return self.chain[-1] if self.chain else None
+
+    def seconds_until_next_block(self, cooldown: float = None) -> float:
+        """
+        Quanto falta (s) para o próximo bloco poder ser minerado.
+
+        Mesma regra usada pela API (POST /mine, /mining/template): um bloco
+        novo só a cada `TARGET_BLOCK_TIME` segundos contados do topo da
+        cadeia, então a recompensa (10 KUR) é paga uma vez a cada 10 min.
+
+        Args:
+            cooldown: Intervalo em segundos (default: TARGET_BLOCK_TIME).
+                0 desliga a checagem.
+
+        Returns:
+            0.0 se já pode minerar; senão os segundos restantes.
+        """
+        if cooldown is None:
+            cooldown = TARGET_BLOCK_TIME
+        cooldown = float(cooldown)
+        last = self.last_block
+        # O gênese (timestamp 0) não conta: a primeira mineração é livre.
+        if not cooldown or last is None or last.index == 0:
+            return 0.0
+        return max(0.0, last.timestamp + cooldown - time.time())
 
     # ─── Mineração (Proof of Work) ────────────────────────────────
 

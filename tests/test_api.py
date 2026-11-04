@@ -89,7 +89,8 @@ class TestAPIMining(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.app = create_app(port=5000)
+        # Testes mineram em sequência: o ritmo de 10 min fica desligado aqui.
+        cls.app = create_app(port=5000, mining_cooldown=0)
         cls.client = cls.app.test_client()
         cls.miner = Wallet()
 
@@ -109,6 +110,8 @@ class TestAPIMining(unittest.TestCase):
         self.assertIn('total_reward', data)
         self.assertIn('miner_address', data)
         self.assertEqual(data['miner_address'], self.miner.address)
+        # Recompensa por bloco: 10 KUR
+        self.assertEqual(data['base_reward'], 10.0)
 
         # Verifica que um bloco foi adicionado
         chain_resp2 = self.client.get('/chain')
@@ -140,7 +143,8 @@ class TestAPIExternalMining(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         # Dificuldade 2 mantem o PoW dos testes rapido.
-        cls.app = create_app(blockchain=Blockchain(difficulty=2), port=5000)
+        cls.app = create_app(blockchain=Blockchain(difficulty=2), port=5000,
+                             mining_cooldown=0)
         cls.client = cls.app.test_client()
         cls.miner = Wallet()
 
@@ -251,7 +255,9 @@ class TestAPITransactions(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.app = create_app(port=5000)
+        # Dificuldade 2: os testes mineram vários blocos para dar saldo.
+        cls.app = create_app(blockchain=Blockchain(difficulty=2), port=5000,
+                             mining_cooldown=0)
         cls.client = cls.app.test_client()
         cls.wallet = Wallet()
         cls.miner = Wallet()
@@ -276,12 +282,17 @@ class TestAPITransactions(unittest.TestCase):
         data = resp.get_json()
         self.assertIn('error', data)
 
+    def _fund_miner(self, blocks: int = 6):
+        """Minerar blocos dá saldo ao minerador (10 KUR por bloco)."""
+        for _ in range(blocks):
+            self.client.post('/mine', json={
+                'miner_address': self.miner.address
+            })
+
     def test_create_valid_signed_transaction(self):
         """Transacao assinada corretamente deve ser aceita."""
-        # Minera um bloco primeiro para dar saldo ao minerador
-        self.client.post('/mine', json={
-            'miner_address': self.miner.address
-        })
+        # Minerar alguns blocos primeiro para dar saldo ao minerador
+        self._fund_miner()
 
         # Cria transacao assinada via endpoint especial
         tx_data = {
@@ -308,7 +319,7 @@ class TestAPITransactions(unittest.TestCase):
         engine = EVMEngine(auto_mine=True)
         self.app.evm_engine = engine
         try:
-            self.client.post('/mine', json={'miner_address': self.miner.address})
+            self._fund_miner()
             evm_receiver = '0x742d35Cc6634C0532925a3b844Bc9e7595f2bD18'
             resp = self.client.post('/api/transactions/create-signed', json={
                 'private_key_pem': self.miner.private_key_pem,
@@ -406,7 +417,7 @@ class TestAPIExplorer(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.app = create_app(port=5000)
+        cls.app = create_app(port=5000, mining_cooldown=0)
         cls.client = cls.app.test_client()
 
     def test_get_supply(self):
@@ -579,6 +590,42 @@ class TestAPISecurity(unittest.TestCase):
         self.assertEqual(resp.status_code, 200)
         # Verifica que security headers estao presentes
         self.assertIn('X-Content-Type-Options', resp.headers)
+
+
+class TestAPIMiningCooldown(unittest.TestCase):
+    """Ritmo de blocos: um bloco (e uma recompensa) a cada 10 minutos."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.app = create_app(blockchain=Blockchain(difficulty=2), port=5000,
+                             mining_cooldown=600)
+        cls.client = cls.app.test_client()
+        cls.miner = Wallet()
+
+    def test_second_block_waits_for_target_block_time(self):
+        """Depois do primeiro bloco, POST /mine responde 429 com retry_after."""
+        first = self.client.post('/mine', json={
+            'miner_address': self.miner.address})
+        self.assertEqual(first.status_code, 200)
+        length = self.client.get('/chain').get_json()['length']
+
+        second = self.client.post('/mine', json={
+            'miner_address': self.miner.address})
+        self.assertEqual(second.status_code, 429)
+        data = second.get_json()
+        self.assertAlmostEqual(data['retry_after'], 600, delta=5)
+        self.assertEqual(data['target_block_time'], 600)
+        # Nada entrou na cadeia: nenhuma recompensa extra foi paga.
+        self.assertEqual(self.client.get('/chain').get_json()['length'], length)
+
+    def test_template_waits_for_target_block_time(self):
+        """O template também só é entregue quando o bloco está liberado."""
+        self.client.post('/mine', json={'miner_address': self.miner.address})
+
+        resp = self.client.get(
+            f'/mining/template?address={self.miner.address}')
+        self.assertEqual(resp.status_code, 429)
+        self.assertGreater(resp.get_json()['retry_after'], 0)
 
 
 if __name__ == '__main__':

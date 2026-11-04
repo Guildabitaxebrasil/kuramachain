@@ -67,7 +67,7 @@ def _env_list(key: str, default):
 TOKEN_NAME = _env('TOKEN_NAME', 'Kurama')
 TOKEN_SYMBOL = _env('TOKEN_SYMBOL', 'KUR')
 TOTAL_SUPPLY_CAP = _env('TOTAL_SUPPLY_CAP', 1_000_000_000.0)
-INITIAL_BLOCK_REWARD = _env('INITIAL_BLOCK_REWARD', 2_500.0)
+INITIAL_BLOCK_REWARD = _env('INITIAL_BLOCK_REWARD', 10.0)
 HALVING_INTERVAL = _env('HALVING_INTERVAL', 200_000)
 
 # ─── Blockchain ──────────────────────────────────────────────────
@@ -87,8 +87,10 @@ WALLET_FILE = _env('WALLET_FILE', 'data/wallet.json')
 
 # ─── Ajuste de Dificuldade ───────────────────────────────────────
 # Ritmo de blocos da rede, como o alvo de 10 minutos do Bitcoin.
-# O minerador automático (miner.py) usa este valor como intervalo entre
-# blocos e o ajuste de dificuldade usa como alvo da janela de retarget.
+# O nó recusa um bloco novo antes de `TARGET_BLOCK_TIME` segundos contados
+# do anterior (POST /mine e GET /mining/template respondem 429 com
+# `retry_after`), então a recompensa só é paga uma vez a cada 10 minutos.
+# O ajuste de dificuldade usa o mesmo valor como alvo da janela.
 DIFFICULTY_ADJUST_INTERVAL = 10  # A cada quantos blocos ajustar
 TARGET_BLOCK_TIME = 600.0      # Tempo alvo por bloco (segundos) — 10 minutos
 

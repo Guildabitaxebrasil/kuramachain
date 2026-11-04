@@ -96,7 +96,9 @@ class TestMinerAgainstNode(unittest.TestCase):
     def setUpClass(cls):
         # Dificuldade 2 só para o PoW não dominar o tempo de teste; o
         # caminho exercitado (template → nonce → submit) é o de produção.
-        cls.app = create_app(blockchain=Blockchain(difficulty=2), port=0)
+        # Ritmo de blocos desligado: aqui mineramos vários em sequência.
+        cls.app = create_app(blockchain=Blockchain(difficulty=2), port=0,
+                             mining_cooldown=0)
         cls.server = make_server('127.0.0.1', 0, cls.app, threaded=True)
         cls.thread = threading.Thread(target=cls.server.serve_forever,
                                       daemon=True)
@@ -212,7 +214,7 @@ class TestNodeRestart(unittest.TestCase):
         """Sobe um nó em porta livre com o autosave que o run.py registra."""
         blockchain.on('on_block_mined',
                       lambda block: blockchain.save_to_file(self.chain_file))
-        app = create_app(blockchain=blockchain, port=0)
+        app = create_app(blockchain=blockchain, port=0, mining_cooldown=0)
         server = make_server('127.0.0.1', 0, app, threaded=True)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()

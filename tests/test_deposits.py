@@ -76,15 +76,16 @@ class TestNativeToEvmDeposits(unittest.TestCase):
 
     def test_reconcile_credits_native_deposits(self):
         """Depósitos já minerados são creditados na EVM e ficam no ledger."""
-        first = self._send_native(250.0)
-        second = self._send_native(50.0)
+        # A recompensa por bloco é 10 KUR: os depósitos cabem no saldo.
+        first = self._send_native(6.0)
+        second = self._send_native(3.0)
 
         report = reconcile_native_deposits(self.chain, self.engine)
 
         self.assertEqual(report['credited'], 2)
         self.assertEqual(report['failed'], [])
         self.assertEqual(self.engine.get_balance(self.receiver),
-                         300 * 10 ** 18)
+                         9 * 10 ** 18)
 
         ledger = load_ledger()
         self.assertIn(first.transaction_id, ledger)
@@ -97,17 +98,17 @@ class TestNativeToEvmDeposits(unittest.TestCase):
 
     def test_reconcile_is_idempotent_in_process(self):
         """Chamar a reconciliação duas vezes no mesmo processo não duplica."""
-        self._send_native(100.0)
+        self._send_native(5.0)
         reconcile_native_deposits(self.chain, self.engine)
         report = reconcile_native_deposits(self.chain, self.engine)
 
         self.assertEqual(report['credited'], 0)
         self.assertEqual(self.engine.get_balance(self.receiver),
-                         100 * 10 ** 18)
+                         5 * 10 ** 18)
 
     def test_reconcile_after_chain_reload(self):
         """Simula restart: chain nativa recarregada do disco + EVM nova."""
-        self._send_native(75.0)
+        self._send_native(7.5)
         path = os.path.join(self._tmp.name, 'chain.json')
         self.chain.save_to_file(path)
         reloaded = Blockchain.load_from_file(path)
@@ -117,7 +118,7 @@ class TestNativeToEvmDeposits(unittest.TestCase):
 
         self.assertEqual(report['credited'], 1)
         self.assertEqual(fresh_engine.get_balance(self.receiver),
-                         75 * 10 ** 18)
+                         7.5 * 10 ** 18)
 
     def test_credit_rejects_non_evm_receiver(self):
         """Destino que não é 0x... não é crédito EVM."""
