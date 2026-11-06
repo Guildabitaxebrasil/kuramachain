@@ -778,12 +778,29 @@ Documentação completa dos endpoints e schemas.
         response.headers['X-XSS-Protection'] = '1; mode=block'
         response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate'
         # Content-Security-Policy: restritivo para prevenir XSS
+        # connect-src permite conexões para:
+        # - API própria (self)
+        # - RPCs públicos de redes EVM usados pelo frontend DeFi (leitura de dados)
         response.headers['Content-Security-Policy'] = (
             "default-src 'self'; "
             "script-src 'self'; "
             "style-src 'self' https://fonts.googleapis.com; "
             "font-src 'self' https://fonts.gstatic.com; "
-            "connect-src 'self'; "
+            "connect-src 'self' "
+            "https://eth.drpc.org "
+            "https://ethereum-rpc.publicnode.com "
+            "https://cloudflare-eth.com "
+            "https://polygon-bor-rpc.publicnode.com "
+            "https://1rpc.io/matic "
+            "https://polygon.drpc.org "
+            "https://bsc-dataseed.binance.org "
+            "https://bsc-rpc.publicnode.com "
+            "https://1rpc.io/bnb "
+            "https://arb1.arbitrum.io/rpc "
+            "https://arbitrum-one-rpc.publicnode.com "
+            "https://1rpc.io/arb "
+            "https://mainnet.optimism.io "
+            "https://optimism-rpc.publicnode.com; "
             "img-src 'self' data:; "
             "frame-ancestors 'none'"
         )
