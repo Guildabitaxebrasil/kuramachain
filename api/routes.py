@@ -29,13 +29,16 @@ Endpoints Explorer (/api/*):
 Endpoints de Rede (P2P):
   POST /blocks/new              - Receber novo bloco de outro nó
 """
-from flask import Flask, jsonify, request, Response, stream_with_context, make_response as _flask_make_response
+from flask import Flask, jsonify, request, Response, g, stream_with_context, make_response as _flask_make_response
 from flask_cors import CORS
 import requests
 import json
 import base64
+import ipaddress
+import socket
 import time
 import threading
+import urllib.parse
 import urllib3
 import queue
 from functools import wraps
@@ -52,7 +55,9 @@ import os
 from config import (
     CORS_ORIGINS, CA_CERT_FILE, NODE_AUTH_HEADER, NETWORK_SECRET,
     SSL_CERT_DIR, P2P_SIGNATURE_HEADER, P2P_PUBKEY_HEADER,
-    P2P_REQUIRE_SIGNATURE, TARGET_BLOCK_TIME
+    P2P_REQUIRE_SIGNATURE, TARGET_BLOCK_TIME, TRUST_PROXY_HEADERS,
+    P2P_TIMESTAMP_HEADER, P2P_NONCE_HEADER, P2P_MAX_CLOCK_DRIFT,
+    P2P_MAX_PEERS, P2P_ALLOWED_PORTS, DEV_EXPOSE_KEYS,
 )
 
 # ─── Suprime warnings SSL para certs auto-assinados (dev) ──────
@@ -62,6 +67,105 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 def _is_production_mode() -> bool:
     """Verifica se o servidor está em modo produção."""
     return os.environ.get('KURAMA_PRODUCTION', '').lower() in ('1', 'true', 'yes')
+
+
+def _dev_keys_enabled() -> bool:
+    """Só devolve chave privada com opt-in explícito e fora de produção."""
+    return not _is_production_mode() and bool(DEV_EXPOSE_KEYS)
+
+
+def _normalize_ip(value) -> str | None:
+    """Normaliza um IP, desembrulhando IPv4 mapeado em IPv6."""
+    try:
+        ip = ipaddress.ip_address(str(value).split('%', 1)[0])
+    except (TypeError, ValueError):
+        return None
+    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped:
+        ip = ip.ipv4_mapped
+    return str(ip)
+
+
+def _is_public_ip(value) -> bool:
+    """Aceita apenas IPs globalmente roteáveis (anti-SSRF)."""
+    normalized = _normalize_ip(value)
+    if not normalized:
+        return False
+    ip = ipaddress.ip_address(normalized)
+    return ip.is_global and not ip.is_multicast
+
+
+def _resolve_public_peer(url: str):
+    """
+    Valida URL de peer: esquema, porta permitida e IPs públicos.
+
+    Resolve o DNS e exige que TODOS os endereços sejam públicos —
+    um host que mistura IP público e privado é recusado (DNS rebinding).
+
+    Returns:
+        (hostname, resolved_ip, erro). erro=None em caso de sucesso.
+    """
+    try:
+        parsed = urllib.parse.urlparse(url)
+    except ValueError:
+        return None, None, 'URL inválida'
+
+    if parsed.scheme not in ('http', 'https'):
+        return None, None, 'esquema não permitido'
+    if parsed.username or parsed.password:
+        return None, None, 'credenciais na URL não permitidas'
+
+    hostname = parsed.hostname
+    if not hostname:
+        return None, None, 'host ausente'
+
+    try:
+        port = parsed.port or (443 if parsed.scheme == 'https' else 80)
+    except ValueError:
+        return None, None, 'porta inválida'
+    if port not in P2P_ALLOWED_PORTS:
+        return None, None, f'porta {port} não permitida'
+
+    try:
+        infos = socket.getaddrinfo(
+            hostname, port, type=socket.SOCK_STREAM
+        )
+    except (OSError, UnicodeError):
+        return None, None, 'DNS não resolve'
+
+    resolved = []
+    for info in infos:
+        raw_ip = info[4][0]
+        normalized = _normalize_ip(raw_ip)
+        if not normalized or not _is_public_ip(normalized):
+            return None, None, f'IP não público: {raw_ip}'
+        if normalized not in resolved:
+            resolved.append(normalized)
+
+    if not resolved:
+        return None, None, 'nenhum IP resolvido'
+    return hostname, resolved[0], None
+
+
+def _decode_p2p_public_key(raw: str | None) -> str | None:
+    """Decodifica a pubkey PEM enviada em Base64 (header HTTP)."""
+    if not raw:
+        return None
+    raw = raw.strip()
+    if 'BEGIN PUBLIC KEY' in raw:
+        return raw
+    try:
+        decoded = base64.b64decode(raw, validate=True).decode('utf-8')
+    except (ValueError, UnicodeDecodeError):
+        return None
+    return decoded if 'BEGIN PUBLIC KEY' in decoded else None
+
+
+def _p2p_payload() -> dict:
+    """Payload P2P já descriptografado por require_p2p_nonce."""
+    cached = g.get('p2p_payload')
+    if cached is not None:
+        return cached
+    return request.get_json(silent=True) or {}
 
 
 # ─── Rate Limiter Multi-Camada ────────────────────────────────────
@@ -215,14 +319,20 @@ peer_score_manager = PeerScoreManager(
 
 def _get_client_ip() -> str:
     """
-    Obtém o IP real do cliente, suportando proxies reversos.
-    Usa X-Forwarded-For quando disponível (ex: atrás de nginx/reverse proxy),
-    com fallback para request.remote_addr.
+    Obtém o IP do cliente para rate limiting.
+
+    X-Forwarded-For é aceito SOMENTE quando TRUST_PROXY_HEADERS=true
+    (nó atrás de um proxy reverso conhecido). Sem isso, qualquer
+    cliente forja o header com um IP aleatório por requisição e anula
+    o rate limit por IP — o header é escolhido pelo atacante, não um
+    dado de confiança.
     """
-    forwarded = request.headers.get('X-Forwarded-For', '')
-    if forwarded:
-        # Pega o primeiro IP da cadeia (cliente real)
-        return forwarded.split(',')[0].strip()
+    if TRUST_PROXY_HEADERS:
+        forwarded = request.headers.get('X-Forwarded-For', '')
+        if forwarded:
+            # O último IP é o adicionado pelo proxy mais próximo, que
+            # é o único confiável quando há uma cadeia de proxies.
+            return forwarded.split(',')[-1].strip()
     return request.remote_addr or 'unknown'
 
 def _verified_request(method: str, url: str, **kwargs) -> requests.Response:
@@ -264,20 +374,24 @@ def _verified_request(method: str, url: str, **kwargs) -> requests.Response:
     if client_cert and client_key and os.path.exists(client_cert) and os.path.exists(client_key):
         kwargs['cert'] = (client_cert, client_key)
 
-    # ─── HMAC-SHA256 para Autenticação P2P ────────────────────────
-    # Em vez de enviar o NETWORK_SECRET em texto puro no header,
-    # envia HMAC-SHA256(secret, body). O receptor verifica com
-    # hmac.compare_digest() em TEMPO CONSTANTE.
-    # Se não houver body (GET), usa string vazia como body HMAC.
-    from config import NETWORK_SECRET as _secret, NODE_AUTH_HEADER
-    from core.crypto_utils import CryptoUtils
+    # ─── Corpo exato + HMAC-SHA256 v2 (autenticação P2P) ────────
+    # Serializamos o JSON nós mesmos para que o MAC cubra exatamente os
+    # bytes que viajam no fio (com json= o requests escolhe a formatação
+    # e o MAC do receptor não fecha). O MAC cobre método, caminho, 
+    # timestamp e nonce — ver CryptoUtils.p2p_request_mac.
+    headers = kwargs.setdefault('headers', {})
+    body_data = kwargs.pop('json', None)
+    if body_data is not None:
+        kwargs['data'] = json.dumps(body_data).encode('utf-8')
+        headers.setdefault('Content-Type', 'application/json')
     body_data = kwargs.get('data', b'')
     if isinstance(body_data, str):
         body_data = body_data.encode('utf-8')
     elif isinstance(body_data, dict):
         body_data = json.dumps(body_data, sort_keys=True).encode('utf-8')
-    hmac_value = CryptoUtils.hmac_sha256(_secret, body_data)
-    kwargs.setdefault('headers', {})[NODE_AUTH_HEADER] = hmac_value
+    # Sem secret compartilhado não há headers de auth (o par recusa).
+    if NETWORK_SECRET:
+        headers.update(_p2p_auth_headers(method, url, body_data))
 
     if method.upper() == 'GET':
         return requests.get(url, **kwargs)
@@ -286,39 +400,108 @@ def _verified_request(method: str, url: str, **kwargs) -> requests.Response:
     else:
         raise ValueError(f"Método HTTP inválido: {method}")
 
+def _p2p_auth_headers(method: str, url: str, body: bytes) -> dict:
+    """
+    Monta os headers de autenticação P2P de uma requisição de saída.
+
+    O MAC cobre método, caminho, timestamp e nonce além do corpo, e o
+    nonce é único por requisição. Sem o vínculo temporal/por-requisição,
+    um POST capturado podia ser reenviado verbatim (replay).
+
+    Args:
+        method: Método HTTP
+        url: URL completa
+        body: Corpo bruto da requisição
+
+    Returns:
+        Dict de headers
+
+    Raises:
+        RuntimeError: Se NETWORK_SECRET não está configurado
+    """
+    if not NETWORK_SECRET:
+        raise RuntimeError(
+            "NETWORK_SECRET não configurado: requisições P2P não são "
+            "autenticadas e serão recusadas pelo par."
+        )
+    import urllib.parse
+    path = urllib.parse.urlparse(url).path or '/'
+    timestamp = str(int(time.time()))
+    nonce = CryptoUtils.generate_p2p_nonce()
+    mac = CryptoUtils.p2p_request_mac(
+        NETWORK_SECRET, method, path, timestamp, nonce, body or b''
+    )
+    return {
+        NODE_AUTH_HEADER: mac,
+        P2P_TIMESTAMP_HEADER: timestamp,
+        P2P_NONCE_HEADER: nonce,
+    }
+
+
 def _require_p2p_hmac(f):
     """
     Decorator que exige autenticação P2P via HMAC-SHA256 entre nós.
 
     SEGURANÇA:
-    1. HMAC-SHA256 em vez de secret em texto puro — o secret NUNCA
-       viaja no header, apenas o HMAC derivado dele
-    2. O HMAC cobre o body da requisição — prova de integridade +
-       autenticidade (non-repudiation)
-    3. hmac.compare_digest() compara em TEMPO CONSTANTE — previne
-       timing attacks que podem vazar o secret caractere por caractere
-    4. Cada requisição tem HMAC único (body-dependent) — previne replay
-       de headers entre requisições diferentes
+    1. O secret NUNCA viaja — apenas o MAC derivado dele
+    2. O MAC cobre método + caminho + timestamp + nonce + corpo:
+       um MAC capturado não pode ser reaproveitado em outra rota,
+       em outro método nem depois da janela de relógio
+    3. O nonce é consumido no cache anti-replay (LRU + TTL): reenvio
+       da mesma requisição é rejeitado
+    4. A comparação é feita em TEMPO CONSTANTE (hmac.compare_digest)
+    5. Fail-closed: sem NETWORK_SECRET, tudo é recusado
 
     Uso:
         @app.route('/blocks/new', methods=['POST'])
         @_require_p2p_hmac
         def receive_block():
             ...
-
-    Header esperado:
-        X-Kurama-Auth: <HMAC-SHA256(NETWORK_SECRET, request_body)>
     """
     @wraps(f)
     def decorated(*args, **kwargs):
-        from config import NETWORK_SECRET as _secret
-        from core.crypto_utils import CryptoUtils
+        if not NETWORK_SECRET:
+            return jsonify({
+                'error': 'Acesso P2P não autorizado. NETWORK_SECRET ausente.'
+            }), 401
+
         auth_header = request.headers.get(NODE_AUTH_HEADER, '')
-        body = request.get_data()
-        if not _secret or not CryptoUtils.hmac_verify(_secret, body, auth_header):
+        timestamp = request.headers.get(P2P_TIMESTAMP_HEADER, '')
+        nonce = request.headers.get(P2P_NONCE_HEADER, '')
+        if not auth_header or not timestamp or not nonce:
+            return jsonify({
+                'error': 'Acesso P2P não autorizado. Headers de '
+                         'autenticação ausentes.'
+            }), 401
+
+        try:
+            ts_value = float(timestamp)
+        except (TypeError, ValueError):
+            return jsonify({'error': 'Timestamp P2P inválido.'}), 401
+
+        if abs(time.time() - ts_value) > P2P_MAX_CLOCK_DRIFT:
+            return jsonify({
+                'error': 'Requisição P2P fora da janela de relógio.'
+            }), 401
+
+        expected = CryptoUtils.p2p_request_mac(
+            NETWORK_SECRET, request.method, request.path, timestamp,
+            nonce, request.get_data()
+        )
+        if not CryptoUtils.hash_equals(expected, auth_header):
             return jsonify({
                 'error': 'Acesso P2P não autorizado. HMAC inválido.'
             }), 401
+
+        # Anti-replay: consome o nonce só depois de autenticar o MAC.
+        ok, reason = p2p_nonce_manager.validate_message({
+            '_nonce': nonce,
+            '_timestamp': ts_value,
+            '_expires': ts_value + P2P_MAX_CLOCK_DRIFT,
+        })
+        if not ok:
+            return jsonify({'error': f'Requisição P2P rejeitada: {reason}'}), 401
+
         return f(*args, **kwargs)
     return decorated
 
@@ -424,18 +607,63 @@ def rate_limit_peer(f):
 # ─── P2P Nonce Validation (anti-replay) ────────────────────────
 # Verifica nonce + timestamp + expiração em mensagens P2P.
 # Previne replay attacks: mesma mensagem reenviada = rejeitada.
+def _decrypt_p2p_payload(data: dict) -> dict:
+    """
+    Descriptografa o envelope AEAD (AES-256-GCM) de um payload P2P.
+
+    O remetente pode envelopar o JSON em {_encrypted, _ciphertext,
+    _nonce}. A chave é derivada de NETWORK_SECRET e o AAD é o caminho
+    da rota. Payload sem envelope é devolvido como está.
+
+    Args:
+        data: Payload recebido
+
+    Returns:
+        Payload em texto claro
+
+    Raises:
+        ValueError: Se o envelope estiver adulterado/incompleto
+    """
+    if not isinstance(data, dict) or not data.get('_encrypted'):
+        return data
+
+    from config import P2P_ENCRYPTION
+    if not P2P_ENCRYPTION:
+        return data
+
+    import hashlib
+    if not NETWORK_SECRET:
+        raise ValueError('NETWORK_SECRET ausente para descriptografar payload')
+    enc_key = hashlib.sha256(NETWORK_SECRET.encode('utf-8')).digest()
+    try:
+        ciphertext = base64.b64decode(data['_ciphertext'])
+        enc_nonce = base64.b64decode(data['_nonce'])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError('Envelope P2P incompleto') from exc
+
+    plaintext = CryptoUtils.aes256gcm_decrypt(
+        enc_key, enc_nonce, ciphertext, request.path.encode('utf-8')
+    )
+    return json.loads(plaintext.decode('utf-8'))
+
+
 def require_p2p_nonce(f):
-    """Valida nonce P2P em endpoints que recebem mensagens P2P."""
+    """Descriptografa o payload P2P e o disponibiliza para a rota.
+
+    O anti-replay é feito pelo nonce do HEADER, consumido em
+    _require_p2p_hmac (que também assina método/caminho/corpo). O
+    envelope opcional do corpo (_nonce/_timestamp/_expires) não é
+    exigido nem consumido de novo: exigir um segundo nonce rejeitava
+    o cliente oficial (que só envia o nonce do header) e permitia
+    replay quando os dois nonces coincidiam.
+    """
     @wraps(f)
     def decorated(*args, **kwargs):
-        data = request.get_json(silent=True) or {}
-        valid, reason = p2p_nonce_manager.validate_message(data)
-        if not valid:
-            peer_id = request.headers.get(P2P_PUBKEY_HEADER, 'unknown')
-            peer_score_manager.record_event(
-                peer_id, 'invalid_signature', url=peer_id
-            )
-            return jsonify({'error': f'Mensagem rejeitada: {reason}'}), 401
+        try:
+            data = _decrypt_p2p_payload(request.get_json(silent=True) or {})
+        except ValueError as e:
+            return jsonify({'error': f'Payload P2P inválido: {e}'}), 401
+        g.p2p_payload = data
         return f(*args, **kwargs)
     return decorated
 
@@ -577,17 +805,35 @@ Documentação completa dos endpoints e schemas.
         """
         if not node_info:
             return False
-        import socket, urllib.parse
+        # Peers locais criados pelo NodeManager (mesmo processo) não
+        # passam por /nodes/register e podem usar loopback.
+        if node_info.get('trusted'):
+            return True
         try:
             parsed = urllib.parse.urlparse(url)
             hostname = parsed.hostname or ''
-            current_ips = socket.getaddrinfo(hostname, None)
+            if not hostname:
+                return False
+            port = parsed.port or (443 if parsed.scheme == 'https' else 80)
+            if port not in P2P_ALLOWED_PORTS:
+                return False
+            stored = _normalize_ip(node_info.get('resolved_ip'))
+            if not stored:
+                return False
+            current_ips = socket.getaddrinfo(
+                hostname, port, type=socket.SOCK_STREAM
+            )
+            found = False
             for addr_info in current_ips:
-                current_ip = addr_info[4][0]
-                if current_ip == node_info.get('resolved_ip'):
-                    return True
-            return False
-        except (socket.gaierror, Exception):
+                current_ip = _normalize_ip(addr_info[4][0])
+                # Se o DNS passou a apontar para qualquer IP não público,
+                # recusa o peer inteiro (proteção contra DNS rebinding).
+                if not current_ip or not _is_public_ip(current_ip):
+                    return False
+                if current_ip == stored:
+                    found = True
+            return found
+        except Exception:
             return False
 
     # Carteira do nó (para receber recompensas de mineração)
@@ -868,12 +1114,12 @@ Documentação completa dos endpoints e schemas.
         Em produção, o ideal é que a frase seja gerada no próprio cliente
         (Web Crypto), para nunca trafegar pela rede.
 
-        ATENÇÃO (Ambiente de Desenvolvimento):
-        - A chave privada é retornada APENAS para facilitar o desenvolvimento
-          e aprendizado com o frontend.
-        - Em produção, a chave privada NUNCA deve sair do cliente.
-          A assinatura deve ser feita exclusivamente no navegador.
-        - Guarde a chave privada com segurança!
+        SEGURANÇA (chave privada):
+        - Por padrão a chave privada NÃO é devolvida, nem em desenvolvimento.
+        - Para assinar localmente no frontend, ligue explicitamente
+          KURAMA_DEV_EXPOSE_KEYS=true (nunca em produção).
+        - A frase de recuperação continua sendo exibida uma única vez:
+          sem ela a carteira não pode ser restaurada.
         """
         mnemonic = generate_mnemonic()
         wallet = Wallet(private_key_pem=private_key_pem_from_mnemonic(mnemonic))
@@ -889,12 +1135,18 @@ Documentação completa dos endpoints e schemas.
         data['mnemonic'] = mnemonic
         data['mnemonic_words'] = len(mnemonic.split())
 
-        if _is_production_mode():
-            data['warning'] = 'Guarde sua chave privada com segurança! Ela não pode ser recuperada.'
-        else:
-            # DEV ONLY: retorna chave privada para testes locais
+        if _dev_keys_enabled():
+            # OPT-IN EXPLÍCITO (KURAMA_DEV_EXPOSE_KEYS=true) e fora de produção.
             data['private_key_pem'] = wallet.private_key_pem
-            data['warning'] = 'DEV MODE: Chave privada retornada apenas para desenvolvimento.'
+            data['warning'] = (
+                'DEV MODE: chave privada exposta por opt-in explícito. '
+                'Nunca use isto em produção.'
+            )
+        else:
+            data['warning'] = (
+                'Guarde sua frase de recuperação com segurança! '
+                'Ela não pode ser recuperada.'
+            )
         
         return jsonify(data), 200
 
@@ -933,8 +1185,8 @@ Documentação completa dos endpoints e schemas.
         data['mnemonic_words'] = len(mnemonic.split())
         data['restored'] = True
 
-        if not _is_production_mode():
-            # DEV ONLY: mesma política de /wallet/new (chave para assinar localmente)
+        if _dev_keys_enabled():
+            # Mesma política de /wallet/new: só com opt-in explícito.
             data['private_key_pem'] = wallet.private_key_pem
 
         return jsonify(data), 200
@@ -972,8 +1224,8 @@ Documentação completa dos endpoints e schemas.
     @app.route('/nodes/register', methods=['POST'])
     @rate_limit
     @rate_limit_peer
-    @require_p2p_nonce
     @_require_p2p_auth
+    @require_p2p_nonce
     def register_nodes():
         """
         Registra nós vizinhos na rede.
@@ -983,7 +1235,7 @@ Documentação completa dos endpoints e schemas.
             "nodes": ["http://localhost:5001", "http://localhost:5002"]
         }
         """
-        data = request.get_json()
+        data = _p2p_payload()
 
         if not data or 'nodes' not in data:
             return jsonify({
@@ -991,114 +1243,42 @@ Documentação completa dos endpoints e schemas.
             }), 400
 
         nodes = data['nodes']
+        if not isinstance(nodes, list):
+            return jsonify({'error': '"nodes" deve ser uma lista'}), 400
+
         registered = []
         duplicates = []
         invalid = []
 
-        # ─── Validação anti-SSRF ──────────────────────────────
-        # Bloqueia URLs que apontam para serviços internos,
-        # impedindo ataques de Server-Side Request Forgery.
-        import urllib.parse
-
         for node_url in nodes:
-            # Valida URL
-            if not node_url.startswith('http'):
-                invalid.append(node_url)
+            if not isinstance(node_url, str) or not node_url:
+                invalid.append(str(node_url)[:120])
                 continue
 
-            # Parseia a URL para verificar o host
-            try:
-                parsed = urllib.parse.urlparse(node_url)
-                hostname = parsed.hostname or ''
-            except Exception:
-                invalid.append(node_url)
-                continue
-
-            # Bloqueia IPs privados (SSRF protection)
-            # Cobre: loopback, link-local, CGNAT, RFC1918, benchmark
-            import socket
-            blocked_prefixes = (
-                '127.', '10.', '192.168.', '172.16.', '172.17.',
-                '172.18.', '172.19.', '172.20.', '172.21.', '172.22.',
-                '172.23.', '172.24.', '172.25.', '172.26.', '172.27.',
-                '172.28.', '172.29.', '172.30.', '172.31.',
-                '0.',                     # 0.0.0.0/8
-                '169.254.',               # Link-local
-                '198.18.', '198.19.',      # Benchmarking
-                '100.64.', '100.65.',      # CGNAT
-                '100.66.', '100.67.', '100.68.', '100.69.',
-                '100.70.', '100.71.', '100.72.', '100.73.',
-                '100.74.', '100.75.', '100.76.', '100.77.',
-                '100.78.', '100.79.', '100.80.', '100.81.',
-                '100.82.', '100.83.', '100.84.', '100.85.',
-                '100.86.', '100.87.', '100.88.', '100.89.',
-                '100.90.', '100.91.', '100.92.', '100.93.',
-                '100.94.', '100.95.', '100.96.', '100.97.',
-                '100.98.', '100.99.', '100.100.', '100.101.',
-                '100.102.', '100.103.', '100.104.', '100.105.',
-                '100.106.', '100.107.', '100.108.', '100.109.',
-                '100.110.', '100.111.', '100.112.', '100.113.',
-                '100.114.', '100.115.', '100.116.', '100.117.',
-                '100.118.', '100.119.', '100.120.', '100.121.',
-                '100.122.', '100.123.', '100.124.', '100.125.',
-                '100.126.', '100.127.',
-            )
-            blocked_hosts = ('localhost', '127.0.0.1', '::1', '0.0.0.0')
-
-            if hostname.lower() in blocked_hosts:
-                invalid.append(f"{node_url} (host local bloqueado por segurança)")
-                continue
-
-            if any(hostname.startswith(p) for p in blocked_prefixes):
-                invalid.append(f"{node_url} (IP privado bloqueado por segurança)")
-                continue
-
-            # Verifica se o hostname resolve para IP privado
-            # Impede bypass via DNS que resolve para IP interno
-            try:
-                resolved_ips = socket.getaddrinfo(hostname, None)
-                for addr_info in resolved_ips:
-                    ip = addr_info[4][0]
-                    if any(ip.startswith(p) for p in blocked_prefixes):
-                        invalid.append(
-                            f"{node_url} (DNS resolve para IP privado: {ip})"
-                        )
-                        break
-                    if ip in blocked_hosts:
-                        invalid.append(
-                            f"{node_url} (DNS resolve para host local: {ip})"
-                        )
-                        break
-            except socket.gaierror:
-                invalid.append(f"{node_url} (DNS não resolve)")
-                continue
-
-            # Verifica duplicata
             if _is_node_registered(node_url):
                 duplicates.append(node_url)
                 continue
 
-            # ─── DNS Rebinding Protection ─────────────────────────
-            # Armazena o IP resolvido no momento do registro.
-            # Em requisições futuras, re-valida o IP para prevenir
-            # DNS rebinding (atacante muda DNS após registro).
-            resolved_ip = None
-            try:
-                # Resolve o IP do hostname novamente para confirmar
-                current_ips = socket.getaddrinfo(hostname, None)
-                for addr_info in current_ips:
-                    ip = addr_info[4][0]
-                    if not any(ip.startswith(p) for p in blocked_prefixes):
-                        resolved_ip = ip
-                        break
-            except socket.gaierror:
-                pass
+            if len(app.nodes) >= P2P_MAX_PEERS:
+                invalid.append(
+                    f'{node_url} (limite de {P2P_MAX_PEERS} peers atingido)'
+                )
+                continue
+
+            # ─── Anti-SSRF ────────────────────────────────────────
+            # IPs privados/loopback/link-local/ULA/CGNAT e IPv4 mapeado
+            # em IPv6 são recusados; a porta precisa estar na allowlist.
+            hostname, resolved_ip, error = _resolve_public_peer(node_url)
+            if error:
+                invalid.append(f'{node_url} ({error})')
+                continue
 
             app.nodes[node_url] = {
                 'url': node_url,
                 'node_id': data.get('node_id', ''),
                 'hostname': hostname,
-                'resolved_ip': resolved_ip or ip,
+                'resolved_ip': resolved_ip,
+                'trusted': False,
                 'registered_at': time.time(),
                 'last_seen': time.time()
             }
@@ -1115,8 +1295,8 @@ Documentação completa dos endpoints e schemas.
     @app.route('/nodes/resolve', methods=['POST'])
     @rate_limit
     @rate_limit_peer
-    @require_p2p_nonce
     @_require_p2p_auth
+    @require_p2p_nonce
     def consensus():
         """
         Executa o algoritmo de consenso.
@@ -1255,8 +1435,8 @@ Documentação completa dos endpoints e schemas.
     @app.route('/blocks/new', methods=['POST'])
     @rate_limit
     @rate_limit_peer
-    @require_p2p_nonce
     @_require_p2p_auth
+    @require_p2p_nonce
     def receive_block():
         """
         Recebe um bloco minerado por outro nó.
@@ -1265,40 +1445,16 @@ Documentação completa dos endpoints e schemas.
         1. Autenticação P2P (X-Kurama-Auth + HMAC)
         2. Nonce anti-replay (X-Kurama-Nonce)
         3. Assinatura ECDSA do payload (obrigatória)
-        3. Estrutura do bloco
-        4. Integridade na cadeia local
+        4. Consenso completo via Blockchain.submit_mined_block
 
         Body (JSON): bloco em formato dict (Block.to_dict())
         """
-        data = request.get_json()
+        data = _p2p_payload()
 
         if not data:
             return jsonify({'error': 'Dados do bloco não fornecidos'}), 400
-
-        # ─── AEAD Decryption (AES-256-GCM) ──────────────────────
-        # Descriptografa payload P2P se veio criptografado.
-        # Segunda camada de segurança além do TLS.
-        from config import P2P_ENCRYPTION, NETWORK_SECRET
-        if P2P_ENCRYPTION and data.get('_encrypted'):
-            try:
-                import hashlib
-                from core.crypto_utils import CryptoUtils
-                enc_key = hashlib.sha256(
-                    NETWORK_SECRET.encode('utf-8')
-                ).digest()
-                ciphertext = base64.b64decode(data['_ciphertext'])
-                enc_nonce = base64.b64decode(data['_nonce'])
-                # AAD = URL da requisição (mesmo usado na criptografia)
-                aad = request.url.encode('utf-8')
-                plaintext = CryptoUtils.aes256gcm_decrypt(
-                    enc_key, enc_nonce, ciphertext, aad
-                )
-                data = json.loads(plaintext.decode('utf-8'))
-            except Exception as e:
-                return jsonify({
-                    'error': 'Falha na descriptografia P2P (AES-256-GCM). '
-                             'Payload adulterado ou chave incorreta.'
-                }), 401
+        if not isinstance(data, dict):
+            return jsonify({'error': 'Dados do bloco inválidos'}), 400
 
         # ─── Verificação de Assinatura ECDSA P2P (OBRIGATÓRIA) ─
         # P2P_REQUIRE_SIGNATURE=True: toda mensagem P2P DEVE ser assinada.
@@ -1306,7 +1462,9 @@ Documentação completa dos endpoints e schemas.
         # correspondente à chave pública fornecida (não-repúdio).
         from config import P2P_REQUIRE_SIGNATURE as _SIG_REQUIRED
         p2p_sig = request.headers.get(P2P_SIGNATURE_HEADER)
-        p2p_pubkey = request.headers.get(P2P_PUBKEY_HEADER)
+        p2p_pubkey = _decode_p2p_public_key(
+            request.headers.get(P2P_PUBKEY_HEADER)
+        )
 
         if _SIG_REQUIRED and (not p2p_sig or not p2p_pubkey):
             return jsonify({
@@ -1330,55 +1488,24 @@ Documentação completa dos endpoints e schemas.
             # O nó pode enviar {'block': {...}} ou o dict diretamente
             block_data = data.get('block', data)
             from core.block import Block
-            block = Block.from_dict(block_data, Transaction)
+            try:
+                candidate = Block.from_dict(block_data, Transaction)
+            except (ValueError, KeyError, TypeError):
+                return jsonify({'error': 'Bloco inválido'}), 400
 
-            # Verifica se o bloco já existe
-            if block.index < len(app.blockchain.chain):
-                existing = app.blockchain.chain[block.index]
-                if existing.hash == block.hash:
-                    return jsonify({'message': 'Bloco já existe', 'status': 'duplicate'}), 200
+            # Idempotência: o mesmo bloco já aceito responde 200.
+            if candidate.index < len(app.blockchain.chain):
+                existing = app.blockchain.chain[candidate.index]
+                if existing.hash == candidate.hash:
+                    return jsonify({
+                        'message': 'Bloco já existe', 'status': 'duplicate'
+                    }), 200
 
-            # Valida o bloco
-            # 1. Verifica se encaixa na cadeia local
-            if block.index != len(app.blockchain.chain):
-                return jsonify({
-                    'error': 'Bloco não encaixa na cadeia local'
-                }), 409
-
-            # 2. Verifica previous_hash
-            last_block = app.blockchain.last_block
-            if last_block and block.previous_hash != last_block.hash:
-                return jsonify({
-                    'error': 'Bloco não encaixa na cadeia local'
-                }), 409
-
-            # 3. Verifica o hash do bloco
-            if block.hash != block.calculate_hash():
-                return jsonify({'error': 'Hash do bloco inválido'}), 400
-
-            # 4. Verifica Proof of Work
-            block_dict = block.to_dict()
-            block_hash = CryptoUtils.hash_block(block_dict)
-            block_difficulty = block.difficulty or app.blockchain.difficulty
-            if not CryptoUtils.is_hash_valid(block_hash, block_difficulty):
-                return jsonify({'error': 'Proof of Work inválido'}), 400
-
-            # 5. Verifica transações
-            if not block.is_valid_transactions():
-                return jsonify({'error': 'Transações do bloco inválidas'}), 400
-
-            # Adiciona o bloco à cadeia
-            app.blockchain.chain.append(block)
-
-            # Remove transações do bloco da mempool local
-            block_tx_ids = {tx.transaction_id for tx in block.transactions}
-            app.blockchain.pending_transactions = [
-                tx for tx in app.blockchain.pending_transactions
-                if tx.transaction_id not in block_tx_ids
-            ]
-
-            # Ajusta dificuldade
-            app.blockchain.adjust_difficulty()
+            # Reaproveita TODAS as regras do consenso (altura,
+            # previous_hash, dificuldade, timestamp, hash/PoW, merkle,
+            # transações, coinbase, supply e mempool) sob o lock de
+            # mineração. É a mesma validação de submit_mined_block.
+            block = app.blockchain.submit_mined_block(block_data)
 
             return jsonify({
                 'message': 'Bloco recebido e adicionado à cadeia local',
@@ -1387,8 +1514,8 @@ Documentação completa dos endpoints e schemas.
                 'chain_length': len(app.blockchain.chain)
             }), 201
 
-        except ValueError:
-            return jsonify({'error': 'Bloco inválido'}), 400
+        except ValueError as e:
+            return jsonify({'error': f'Bloco inválido: {e}'}), 400
         except Exception:
             return jsonify({'error': 'Erro interno do servidor'}), 500
 
@@ -1663,8 +1790,8 @@ Documentação completa dos endpoints e schemas.
     @app.route('/api/nodes/sync', methods=['POST'])
     @rate_limit
     @rate_limit_peer
-    @require_p2p_nonce
     @_require_p2p_auth
+    @require_p2p_nonce
     def api_nodes_sync():
         """
         Executa consenso contra todos os nós vizinhos.
@@ -1776,6 +1903,7 @@ Documentação completa dos endpoints e schemas.
     SSE_MAX_CONNECTIONS = 50
 
     @app.route('/api/events', methods=['GET'])
+    @rate_limit
     def api_events():
         """
         Server-Sent Events (SSE) para atualizações em tempo real.
@@ -1962,5 +2090,31 @@ Documentação completa dos endpoints e schemas.
             return jsonify({'error': 'Transação inválida'}), 400
         except Exception:
             return jsonify({'error': 'Erro interno do servidor'}), 500
+
+    # ═══════════════════════════════════════════════════════════════
+    # SPA (build do frontend) no mesmo domínio da API
+    # ═══════════════════════════════════════════════════════════════
+    # O frontend usa baseURL '/', então precisa ser servido pela mesma
+    # origem da API. As rotas registradas acima têm precedência sobre o
+    # catch-all, que só atende GET de arquivo estático e fallback do SPA.
+    _root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    dist_dir = os.environ.get(
+        'FRONTEND_DIST', os.path.join(_root, 'frontend', 'dist')
+    )
+    if os.path.isdir(dist_dir):
+        from flask import send_from_directory
+
+        @app.route('/', defaults={'path': ''})
+        @app.route('/<path:path>')
+        def serve_spa(path):
+            """Serve o build do Vite e faz fallback de rotas do SPA."""
+            if path.startswith('api/'):
+                return jsonify({'error': 'Endpoint não encontrado'}), 404
+            safe = os.path.normpath(path).replace('\\', '/')
+            if safe not in ('.', '') and not safe.startswith('..'):
+                candidate = os.path.join(dist_dir, safe)
+                if os.path.isfile(candidate):
+                    return send_from_directory(dist_dir, safe)
+            return send_from_directory(dist_dir, 'index.html')
 
     return app

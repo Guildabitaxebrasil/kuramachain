@@ -18,6 +18,7 @@ import hashlib
 import base64
 import threading
 import time
+import urllib.parse
 import urllib3
 import requests
 from typing import Dict, List, Optional
@@ -28,7 +29,8 @@ from core.crypto_utils import CryptoUtils
 from config import (
     NODE_HEALTH_TIMEOUT, SYNC_INTERVAL, CA_CERT_FILE,
     NODE_AUTH_HEADER, NETWORK_SECRET, SSL_CERT_DIR,
-    P2P_SIGNATURE_HEADER, P2P_PUBKEY_HEADER
+    P2P_SIGNATURE_HEADER, P2P_PUBKEY_HEADER,
+    P2P_TIMESTAMP_HEADER, P2P_NONCE_HEADER,
 )
 
 # ─── Suprime warnings de certificado auto-assinado ─────────────
@@ -134,74 +136,92 @@ class NodeManager:
             )
             kwargs['verify'] = False
 
-        # ─── Headers (Autenticação HMAC-SHA256) ────────────────
-        # Em vez de enviar NETWORK_SECRET em texto puro, envia
-        # HMAC-SHA256(secret, body). O secret NUNCA viaja no header.
-        if 'headers' not in kwargs:
-            kwargs['headers'] = {}
+        kwargs.setdefault('headers', {})
+        headers = kwargs['headers']
+
+        # Sem NETWORK_SECRET não há como autenticar: o par vai recusar
+        # (fail-closed). Não adicionamos headers para não quebrar
+        # endpoints públicos (ex.: /api/health), mas nenhum POST P2P
+        # autenticado funciona nesse estado.
+        if not NETWORK_SECRET:
+            return NodeManager._send(method, url, kwargs)
+
         from core.crypto_utils import CryptoUtils
-        body_data = kwargs.get('data', b'')
-        if isinstance(body_data, str):
-            body_data = body_data.encode('utf-8')
-        elif isinstance(body_data, dict):
-            body_data = json.dumps(body_data, sort_keys=True).encode('utf-8')
-        elif kwargs.get('json'):
-            # Handle requests.json parameter
-            body_data = json.dumps(kwargs['json'], sort_keys=True).encode('utf-8')
-        kwargs['headers'][NODE_AUTH_HEADER] = CryptoUtils.hmac_sha256(
-            NETWORK_SECRET, body_data
-        )
+        from config import P2P_ENCRYPTION
+
+        # ─── Corpo exato no fio ────────────────────────────────
+        # Serializamos o JSON aqui e enviamos via data= para que o MAC
+        # cubra exatamente os bytes transmitidos (com json= o requests
+        # re-serializa e o MAC do receptor não fecha).
+        payload = kwargs.pop('json', None)
+        if payload is not None:
+            kwargs['data'] = json.dumps(payload).encode('utf-8')
+            headers.setdefault('Content-Type', 'application/json')
+        elif isinstance(kwargs.get('data'), (dict, list)):
+            kwargs['data'] = json.dumps(kwargs['data']).encode('utf-8')
+            headers.setdefault('Content-Type', 'application/json')
+        elif isinstance(kwargs.get('data'), str):
+            kwargs['data'] = kwargs['data'].encode('utf-8')
 
         # ─── AEAD Encryption (AES-256-GCM) ──────────────────────
-        # Segunda camada de proteção além do TLS: o payload JSON
-        # é criptografado com AES-256-GCM usando NETWORK_SECRET
-        # como chave compartilhada. Garante confidencialidade e
-        # integridade mesmo que o TLS seja comprometido (verify=False em dev).
-        from config import P2P_ENCRYPTION
+        # Segunda camada de proteção além do TLS: o corpo é cifrado com
+        # AES-256-GCM, chave derivada de NETWORK_SECRET e AAD = caminho
+        # da rota.
         if (P2P_ENCRYPTION and method.upper() == 'POST'
-                and (kwargs.get('json') is not None)):
-            from core.crypto_utils import CryptoUtils
-            # Deriva chave AES-256 do NETWORK_SECRET via SHA-256
+                and kwargs.get('data')):
             enc_key = hashlib.sha256(
                 NETWORK_SECRET.encode('utf-8')
             ).digest()
-            plaintext = json.dumps(
-                kwargs['json'], sort_keys=True
-            ).encode('utf-8')
-            # AAD = URL da requisição (liga ciphertext ao destino)
-            aad = url.encode('utf-8')
+            # AAD = caminho da rota (sem host/query): liga o ciphertext ao
+            # endpoint e continua válido atrás de proxy reverso.
             enc_nonce, ciphertext = CryptoUtils.aes256gcm_encrypt(
-                enc_key, plaintext, aad
+                enc_key, kwargs['data'],
+                aad=urllib.parse.urlparse(url).path.encode('utf-8')
             )
-            # Substitui o payload JSON pelo envelope criptografado
-            kwargs['json'] = {
+            envelope = {
                 '_encrypted': True,
                 '_ciphertext': base64.b64encode(ciphertext).decode('utf-8'),
-                '_nonce': base64.b64encode(enc_nonce).decode('utf-8')
+                '_nonce': base64.b64encode(enc_nonce).decode('utf-8'),
             }
-            # Atualiza o HMAC para cobrir o payload criptografado
-            new_body = json.dumps(kwargs['json'], sort_keys=True).encode('utf-8')
-            kwargs['headers'][NODE_AUTH_HEADER] = CryptoUtils.hmac_sha256(
-                NETWORK_SECRET, new_body
-            )
-            kwargs['headers']['X-Kurama-Encrypted'] = 'aes256gcm'
+            kwargs['data'] = json.dumps(envelope).encode('utf-8')
+            headers['X-Kurama-Encrypted'] = 'aes256gcm'
 
         # ─── Assinatura ECDSA do Payload P2P ───────────────────
-        # Se for POST com JSON e temos chave privada, assinamos
-        # o payload para garantir integridade e não-repúdio.
+        # A assinatura cobre o payload LÓGICO (o receptor verifica
+        # depois de descriptografar), garantindo não-repúdio.
         if (sign_payload and signing_key_pem
                 and method.upper() == 'POST'
-                and 'json' in kwargs):
-            from core.crypto_utils import CryptoUtils
-            payload_str = json.dumps(kwargs['json'], sort_keys=True)
+                and payload is not None):
             signature = CryptoUtils.sign_p2p_message(
-                signing_key_pem, kwargs['json']
+                signing_key_pem, payload
             )
-            kwargs['headers'][P2P_SIGNATURE_HEADER] = signature
-            kwargs['headers'][P2P_PUBKEY_HEADER] = (
-                Wallet.get_public_key_from_private(signing_key_pem)
-            )
+            headers[P2P_SIGNATURE_HEADER] = signature
+            # PEM tem newlines, proibidos em header HTTP: vai em Base64.
+            pubkey_pem = Wallet.get_public_key_from_private(signing_key_pem)
+            headers[P2P_PUBKEY_HEADER] = base64.b64encode(
+                pubkey_pem.encode('utf-8')
+            ).decode('ascii')
 
+        # ─── HMAC-SHA256 v2 (por último: cobre os bytes finais) ─
+        # Método + caminho + timestamp + nonce + corpo. Sem o vínculo
+        # temporal um POST capturado podia ser reenviado verbatim.
+        import time as _time
+        timestamp = str(int(_time.time()))
+        nonce = CryptoUtils.generate_p2p_nonce()
+        mac = CryptoUtils.p2p_request_mac(
+            NETWORK_SECRET, method,
+            urllib.parse.urlparse(url).path or '/',
+            timestamp, nonce, kwargs.get('data') or b''
+        )
+        headers[NODE_AUTH_HEADER] = mac
+        headers[P2P_TIMESTAMP_HEADER] = timestamp
+        headers[P2P_NONCE_HEADER] = nonce
+
+        return NodeManager._send(method, url, kwargs)
+
+    @staticmethod
+    def _send(method: str, url: str, kwargs: dict) -> requests.Response:
+        """Despacha a requisição HTTP já montada."""
         if method.upper() == 'GET':
             return requests.get(url, **kwargs)
         elif method.upper() == 'POST':
@@ -268,6 +288,8 @@ class NodeManager:
                     'url': other_node.url,
                     'hostname': other_node.host,
                     'resolved_ip': '127.0.0.1',
+                    # Peer local do mesmo processo: pode usar loopback.
+                    'trusted': True,
                     'registered_at': time.time(),
                     'last_seen': time.time()
                 }

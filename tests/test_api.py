@@ -375,10 +375,23 @@ class TestAPIWallet(unittest.TestCase):
         data = resp.get_json()
         self.assertIn('address', data)
         self.assertIn('public_key', data)
-        # Em dev mode, private_key_pem deve estar presente
-        self.assertIn('private_key_pem', data)
+        # Por padrao a chave privada NAO trafega pela rede.
+        self.assertNotIn('private_key_pem', data)
+        self.assertIn('mnemonic', data)
         # Endereco deve ter tamanho razoavel
         self.assertGreater(len(data['address']), 20)
+
+    def test_new_wallet_private_key_requires_explicit_opt_in(self):
+        """KURAMA_DEV_EXPOSE_KEYS=true e o unico caminho para a chave."""
+        import api.routes as routes
+        previous = routes.DEV_EXPOSE_KEYS
+        routes.DEV_EXPOSE_KEYS = True
+        try:
+            resp = self.client.post('/wallet/new', json={})
+            self.assertEqual(resp.status_code, 200)
+            self.assertIn('private_key_pem', resp.get_json())
+        finally:
+            routes.DEV_EXPOSE_KEYS = previous
 
     def test_get_balance(self):
         """GET /balance/<address> deve retornar saldo (sem historico por padrao)."""

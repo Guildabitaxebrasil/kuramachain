@@ -63,6 +63,29 @@ def _env_list(key: str, default):
     items = [item.strip() for item in val.split(',') if item.strip()]
     return items or default
 
+
+def _env_ports(key: str, default: str = '80,443,5000-5010') -> frozenset:
+    """Lê uma lista de portas aceitando intervalos (ex.: '80,443,5000-5010')."""
+    raw = os.environ.get(key) or default
+    ports = set()
+    for part in raw.split(','):
+        part = part.strip()
+        if not part:
+            continue
+        try:
+            if '-' in part:
+                lo, hi = (int(x) for x in part.split('-', 1))
+                if lo > hi or lo < 1 or hi > 65535:
+                    continue
+                ports.update(range(lo, hi + 1))
+            else:
+                port = int(part)
+                if 1 <= port <= 65535:
+                    ports.add(port)
+        except ValueError:
+            continue
+    return frozenset(ports) or frozenset({80, 443, 5000})
+
 # ─── Token ───────────────────────────────────────────────────────
 TOKEN_NAME = _env('TOKEN_NAME', 'Kurama')
 TOKEN_SYMBOL = _env('TOKEN_SYMBOL', 'KUR')
@@ -79,6 +102,13 @@ GENESIS_PREV_HASH = '0' * 64
 DEFAULT_PORT = _env('PORT', 5000)
 API_HOST = _env('HOST', '0.0.0.0')
 NODE_TIMEOUT = _env('NODE_TIMEOUT', 2.0)
+
+# ─── Proxy reverso / Rate Limit ──────────────────────────────────
+# X-Forwarded-For SÓ é confiável quando o nó está atrás de um proxy
+# controlado. Com False (padrão), o header é ignorado e usamos o
+# remote_addr — caso contrário qualquer cliente forja o header e
+# fura todo o rate limit por IP.
+TRUST_PROXY_HEADERS = _env('TRUST_PROXY_HEADERS', False)
 
 # ─── Dados / Persistência ────────────────────────────────────────
 DATA_DIR = _env('DATA_DIR', 'data')
@@ -101,13 +131,15 @@ MIN_TRANSACTION_FEE = 0.001    # Taxa mínima por transação (KUR) — paga ao 
 
 # ─── Frontend / Explorer ─────────────────────────────────────────
 FRONTEND_PORT = 5173           # Porta padrão do Vite dev server
-CORS_ORIGINS = [               # Origens permitidas para CORS
+# Origens permitidas para CORS. Em produção (API e SPA no mesmo domínio)
+# nenhuma origem extra é necessária; se o frontend ficar em outro host,
+# liste as URLs em CORS_ORIGINS (separadas por vírgula) no ambiente.
+CORS_ORIGINS = _env_list('CORS_ORIGINS', [
     'http://localhost:5173',
     'http://localhost:3000',
     'http://127.0.0.1:5173',
     'http://localhost:5174',
-    # Render - adicionar URLs após o deploy
-]
+])
 
 # ─── SSL / HTTPS ─────────────────────────────────────────────────
 SSL_CERT_DIR = 'certs'              # Diretório dos certificados SSL
@@ -120,8 +152,10 @@ USE_HTTPS = True                    # Forçar HTTPS (desabilitar com --no-ssl)
 # Secret compartilhado entre nós para autenticação de requisições P2P.
 # Em produção, gere um secret forte e distribua seguramente via vault.
 # Se vazio, um UUID aleatório é gerado na inicialização.
-NETWORK_SECRET = ''                  # Preencher ou deixar vazio para auto-gerar
-NODE_AUTH_HEADER = 'X-Kurama-Auth'   # Header HTTP para autenticação P2P
+NETWORK_SECRET = _env('NETWORK_SECRET', '')  # Vazio = P2P desabilitado (fail-closed)
+NODE_AUTH_HEADER = 'X-Kurama-Auth'   # HMAC-SHA256 da requisição (v2, ligado a método/path/timestamp/nonce)
+P2P_TIMESTAMP_HEADER = 'X-Kurama-Timestamp'  # Epoch do remetente (anti-replay)
+P2P_NONCE_HEADER = 'X-Kurama-Nonce'          # Nonce único por requisição
 MIN_P2P_AUTH_SECRET_LENGTH = 32      # Tamanho mínimo do secret
 
 # ─── Segurança Criptográfica ──────────────────────────────────────
@@ -133,16 +167,24 @@ WALLET_ENCRYPTION_SALT_BYTES = 32       # Salt size for PBKDF2
 P2P_HMAC_AUTH = True                     # Usar HMAC-SHA256 em vez de secret puro
 P2P_ENCRYPTION = True                    # Criptografar payloads P2P com AES-256-GCM
 
+# Expor a chave privada em /wallet/new e /wallet/restore (APENAS dev).
+# Desligado por padrão: a chave privada nunca deve trafegar pela rede.
+# Ligue explicitamente com KURAMA_DEV_EXPOSE_KEYS=true e somente em localhost.
+DEV_EXPOSE_KEYS = _env('KURAMA_DEV_EXPOSE_KEYS', False)
+
 # Consenso / Finality
 REORG_LIMIT = 100                        # Profundidade máxima de reorganização (0 = ilimitado)
 # Headers para assinatura criptográfica de mensagens P2P.
 # Cada nó assina suas mensagens com sua chave privada ECDSA.
 P2P_SIGNATURE_HEADER = 'X-Kurama-Signature'   # Assinatura Base64
-P2P_PUBKEY_HEADER = 'X-Kurama-Public-Key'      # Chave pública PEM do remetente
+P2P_PUBKEY_HEADER = 'X-Kurama-Public-Key'     # PEM da chave pública, em Base64 (sem newlines)
 P2P_REQUIRE_SIGNATURE = True                   # Exigir assinatura (True = produção)
 P2P_RATE_LIMIT = 100                           # Máx requisições P2P por peer por janela
 P2P_NONCE_TTL = 300                            # TTL do nonce anti-replay (5 min)
 P2P_MAX_CLOCK_DRIFT = 30                       # Tolerância de clock drift (30s)
+P2P_MAX_PEERS = _env('P2P_MAX_PEERS', 50)      # Teto de peers registrados
+# Portas permitidas para peers (anti-SSRF). Aceita intervalos.
+P2P_ALLOWED_PORTS = _env_ports('P2P_ALLOWED_PORTS')
 P2P_NONCE_CACHE_SIZE = 100000                  # Máx nonces no cache LRU
 P2P_PEER_SCORE_BAN_THRESHOLD = -100            # Score mínimo antes de ban
 P2P_PEER_SCORE_BAN_BASE = 3600                 # Ban inicial: 1h (exponential backoff)
