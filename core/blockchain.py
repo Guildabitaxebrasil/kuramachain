@@ -96,6 +96,18 @@ class Blockchain:
         # coinbases ou corromper a cadeia durante mineração concorrente.
         self._mining_lock = threading.Lock()
 
+        # ─── Lock da Cadeia ──────────────────────────────────────
+        # Protege self.chain contra race conditions entre mineração,
+        # consenso (resolve_conflicts) e /blocks/new.
+        # SEM this lock: corrida mineração × consenso gera índices
+        # duplicados e cadeia inválida (ver TECHNICAL_AUDIT_V4.md C1).
+        self._chain_lock = threading.RLock()
+
+        # ─── Lock de Persistência ───────────────────────────────
+        # Protege save_to_file de escritas concorrentes que poderiam
+        # corromper o arquivo com writes sobrepostos no mesmo tmp.
+        self._persist_lock = threading.Lock()
+
         # ─── Lock da Mempool ─────────────────────────────────────
         # Protege pending_transactions contra race conditions entre
         # add_transaction(), mine_block() e _cleanup_pending().
@@ -669,10 +681,10 @@ class Blockchain:
         # Garante atomicidade: snapshots de pending_transactions
         # prevenindo race conditions com add_transaction().
         # Libera o lock ANTES do PoW (operação longa).
+        # NOTA: Removemos a checagem de mempool cheia aqui pois a
+        # mineração é o próprio mecanismo que libera a mempool.
+        # A checagem MAX_PENDING_TX permanece apenas em add_transaction().
         with self._mempool_lock:
-            if len(self.pending_transactions) >= MAX_PENDING_TX:
-                print("[WARN] Mempool cheia, não é possível minerar")
-                return None
 
             # ─── Calcula recompensa com halving + fees ────────────
             new_index = self.last_block.index + 1 if self.last_block else 1
@@ -752,8 +764,10 @@ class Blockchain:
                 if tx.transaction_id not in mined_ids
             ]
 
-        # Adiciona à cadeia
-        self.chain.append(block)
+        # ─── Adiciona à cadeia (protegido por _chain_lock) ─────
+        # Garante atomicidade com resolve_conflicts e /blocks/new.
+        with self._chain_lock:
+            self.chain.append(block)
         self.adjust_difficulty()
 
         print(f"[OK] Bloco #{new_index} minerado!")
@@ -1183,12 +1197,23 @@ class Blockchain:
             'node_id': self.node_id
         }
 
-        # Escrita atômica: grava em um temporário e renomeia. Com autosave a
-        # cada bloco, um crash no meio do dump não pode corromper a cadeia.
-        tmp_path = f'{filepath}.tmp'
-        with open(tmp_path, 'w') as f:
-            json.dump(data, f, indent=2)
-        os.replace(tmp_path, filepath)
+        # Escrita atômica com lock para evitar corrupção por writes concorrentes
+        # (autosave + save manual + consenso podem tentar salvar ao mesmo tempo).
+        with self._persist_lock:
+            # Usa arquivo temporário único por thread para evitar colisão
+            import uuid
+            tmp_path = f'{filepath}.{uuid.uuid4().hex}.tmp'
+            try:
+                with open(tmp_path, 'w') as f:
+                    json.dump(data, f, indent=2)
+                os.replace(tmp_path, filepath)
+            finally:
+                # Limpa arquivo temporário se Something errado ocorreu
+                if os.path.exists(tmp_path):
+                    try:
+                        os.remove(tmp_path)
+                    except OSError:
+                        pass
 
         print(f"[SAVE] Blockchain salva em {filepath} "
               f"({len(self.chain)} blocos, "
@@ -1339,7 +1364,10 @@ class Blockchain:
                           f"limite de {REORG_LIMIT}. Rejeitada.")
                     return False
 
-            self.chain = new_chain
+            # ─── Substitui cadeia (protegido por _chain_lock) ───
+            # Evita corrida com mineração e /blocks/new.
+            with self._chain_lock:
+                self.chain = new_chain
 
             # ─── Merge da Mempool Pós-Consenso ───────────────────
             # Re-valida transações pendentes contra a nova cadeia.
@@ -1373,7 +1401,16 @@ class Blockchain:
 
             print(f"[SYNC] Consenso: cadeia substituída "
                   f"(trabalho acumulado: {best_work:.0f})")
-            self._emit('on_chain_replaced', old_len, len(self.chain))
+            # Emite evento fora do lock para evitar deadlocks com callbacks
+            # que possam tentar acessar a cadeia (ex: save_to_file).
+            old_len_send = old_len
+            new_len_send = len(self.chain)
+            self._emit('on_chain_replaced', old_len_send, new_len_send)
+            # Salva a cadeia após consenso para persistência
+            try:
+                self.save_to_file()
+            except Exception as e:
+                print(f"[WARN] Falha ao salvar após consenso: {e}")
             return True
 
         print(f"[OK] Consenso: cadeia local mantida "

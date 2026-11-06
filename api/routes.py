@@ -180,22 +180,53 @@ class AdvancedRateLimiter:
     2. Por wallet: limite por endereço de carteira (anti-botnet)
     3. Adaptativo: IPs com muitas rejeições têm limite reduzido
     4. Suporta X-Forwarded-For para proxies reversos
+
+    Evita vazamento de memória com:
+    - TTL nos buckets de IP (eviction automática após window_seconds)
+    - Limite máximo de buckets (cap); IPs com mais de MAX_REJECTIONS
+      entram em cooldown gradual com decaimento da penalidade.
     """
+
+    # Evitando vazamento de memória: número máximo de IPs rastreados.
+    # IPs que excederem este limite e estiverem inativos são evictados.
+    MAX_IP_BUCKETS = 10000
+    MAX_REJECTIONS_BEFORE_COOLDOWN = 12  # penalidade máxima antes de reset
 
     def __init__(self, max_requests: int = 60, window_seconds: int = 60):
         self.max_requests = max_requests
         self.window_seconds = window_seconds
-        self._ip_clients: dict = {}
-        self._wallet_clients: dict = {}
-        self._rejection_count: dict = {}
+        self._ip_clients: dict = {}  # ip -> list of timestamps
+        self._wallet_clients: dict = {}  # wallet -> list of timestamps
+        self._rejection_count: dict = {}  # ip -> count
         self._lock = threading.Lock()
+
+    def _evict_expired_buckets(self, now: float):
+        """Remove buckets de IP inativos para evitar vazamento de memória."""
+        # Evita iterar sobre todos os IPs se houver poucos buckets
+        if len(self._ip_clients) > self.MAX_IP_BUCKETS:
+            expired_ips = [
+                ip for ip, timestamps in self._ip_clients.items()
+                if not timestamps or (now - timestamps[-1]) > self.window_seconds * 2
+            ]
+            for ip in expired_ips:
+                del self._ip_clients[ip]
+                self._rejection_count.pop(ip, None)
 
     def is_allowed(self, ip: str, wallet: str = None) -> bool:
         now = time.time()
         with self._lock:
-            # Penalidade adaptativa: IPs com muitas rejeições
-            # têm limite reduzido progressivamente.
+            # Eviction de buckets inativos para controle de memória
+            self._evict_expired_buckets(now)
+
+            # Penalidade adaptativa com decaimento: IPs com muitas rejeições
+            # têm limite reduzido, mas a penalidade decai com o tempo.
             rejections = self._rejection_count.get(ip, 0)
+            # Decaimento: reduz penalidade após window_seconds sem rejeições
+            if rejections > 0 and (now - self._rejection_count.get(f'{ip}_last', 0)) > self.window_seconds:
+                # Gradualmente reduz a penalidade (metade a cada janela)
+                decay_factor = max(1, rejections // 2)
+                self._rejection_count[ip] = decay_factor
+                rejections = decay_factor
             effective_max = max(1, self.max_requests - rejections * 5)
 
             # Rate limit por IP
@@ -226,9 +257,18 @@ class AdvancedRateLimiter:
             return True
 
     def register_rejection(self, ip: str):
-        """Incrementa contagem de rejeições para rate limit adaptativo."""
+        """Incrementa contagem de rejeições para rate limit adaptativo.
+        
+        Após MAX_REJECTIONS_BEFORE_COOLDOWN rejeições, o IP entra em
+        cooldown com penalidade máxima. A penalidade decai com o tempo.
+        """
         with self._lock:
-            self._rejection_count[ip] = self._rejection_count.get(ip, 0) + 1
+            current = self._rejection_count.get(ip, 0)
+            # Limita o número de rejeições registradas para evitar penalidade infinita
+            if current < self.MAX_REJECTIONS_BEFORE_COOLDOWN:
+                self._rejection_count[ip] = current + 1
+            # Registra timestamp da última rejeição para decaimento
+            self._rejection_count[f'{ip}_last'] = time.time()
 
 rate_limiter = AdvancedRateLimiter(max_requests=60, window_seconds=60)
 
@@ -526,10 +566,13 @@ def rate_limit(f):
                 wallet = data.get('sender_address')
 
         if not rate_limiter.is_allowed(ip, wallet):
-            return jsonify({
+            response = jsonify({
                 'error': 'Muitas requisições. Aguarde e tente novamente.',
                 'retry_after': 60
-            }), 429
+            })
+            response.status_code = 429
+            response.headers['Retry-After'] = '60'
+            return response
 
         try:
             response = f(*args, **kwargs)
@@ -591,10 +634,13 @@ def rate_limit_peer(f):
     def decorated(*args, **kwargs):
         peer_id = request.headers.get(P2P_PUBKEY_HEADER, _get_client_ip())
         if not p2p_rate_limiter.is_allowed(peer_id):
-            return jsonify({
+            response = jsonify({
                 'error': 'Rate limit P2P excedido. Aguarde.',
                 'retry_after': 60
-            }), 429
+            })
+            response.status_code = 429
+            response.headers['Retry-After'] = '60'
+            return response
         try:
             response = f(*args, **kwargs)
             return response
@@ -1586,8 +1632,21 @@ Documentação completa dos endpoints e schemas.
             min_amount: Valor mínimo
             max_amount: Valor máximo
         """
+        # Validação de parâmetros de paginação
         page = request.args.get('page', 1, type=int)
         per_page = request.args.get('per_page', 20, type=int)
+        
+        # Valida page (deve ser positivo)
+        if page < 1:
+            return jsonify({'error': 'page deve ser um número positivo'}), 400
+        
+        # Valida per_page (deve ser positivo e menor que MAX_PER_PAGE)
+        MAX_PER_PAGE = 100
+        if per_page < 1:
+            return jsonify({'error': 'per_page deve ser um número positivo'}), 400
+        if per_page > MAX_PER_PAGE:
+            per_page = MAX_PER_PAGE  # Limita para evitar OOM
+
         address = request.args.get('address', None, type=str)
         sender = request.args.get('sender', None, type=str)
         receiver = request.args.get('receiver', None, type=str)
@@ -1923,10 +1982,13 @@ Documentação completa dos endpoints e schemas.
         """
         # Verifica limite de conexões SSE
         if sse_manager.subscriber_count >= SSE_MAX_CONNECTIONS:
-            return jsonify({
+            response = jsonify({
                 'error': 'Limite de conexões SSE atingido. Reconecte mais tarde.',
                 'code': 'SSE_LIMIT_REACHED'
-            }), 429
+            })
+            response.status_code = 429
+            response.headers['Retry-After'] = '30'
+            return response
 
         def event_stream():
             q = sse_manager.subscribe()
@@ -2104,10 +2166,13 @@ Documentação completa dos endpoints e schemas.
     if os.path.isdir(dist_dir):
         from flask import send_from_directory
 
-        @app.route('/', defaults={'path': ''})
-        @app.route('/<path:path>')
+        @app.route('/', defaults={'path': ''}, methods=['GET'])
+        @app.route('/<path:path>', methods=['GET'])
         def serve_spa(path):
-            """Serve o build do Vite e faz fallback de rotas do SPA."""
+            """Serve o build do Vite e faz fallback de rotas do SPA.
+
+            Só serve arquivos estáticos e faz fallback para index.html.
+            """
             if path.startswith('api/'):
                 return jsonify({'error': 'Endpoint não encontrado'}), 404
             safe = os.path.normpath(path).replace('\\', '/')
@@ -2116,5 +2181,27 @@ Documentação completa dos endpoints e schemas.
                 if os.path.isfile(candidate):
                     return send_from_directory(dist_dir, safe)
             return send_from_directory(dist_dir, 'index.html')
+
+        # before_request para interceptar métodos não permitidos antes do catch-all
+        # Isso garante que GET /mine retorne 405 em vez de 200 com HTML do SPA.
+        from flask import request as _request
+        @app.before_request
+        def check_method_not_allowed():
+            # Verifica se a rota existe como endpoint da API com métodos diferentes
+            # do catch-all (serve_spa). Se sim e o método atual não é suportado,
+            # retorna 405 Method Not Allowed.
+            if _request.endpoint == 'serve_spa' or _request.endpoint is None:
+                path = _request.path
+                if path and not path.startswith('/api/'):
+                    # Verifica se existe uma regra para este path
+                    rule = None
+                    for r in app.url_map.iter_rules():
+                        if r.rule == path or r.rule == path.rstrip('/'):
+                            rule = r
+                            break
+                    if rule and rule.endpoint != 'serve_spa':
+                        # Se o método não é suportado pela regra, retorna 405
+                        if _request.method not in rule.methods and _request.method != 'HEAD':
+                            return jsonify({'error': 'Método não permitido para este endpoint'}), 405
 
     return app
