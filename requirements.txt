@@ -8,6 +8,9 @@ Flask==3.1.0
 Flask-Cors==5.0.1
 # Cliente HTTP para comunicação entre nós P2P
 requests==2.32.3
+# Servidor WSGI de produção (Procfile / Render). O estado da cadeia vive na
+# memória do processo, então o deploy usa 1 worker com threads.
+gunicorn==23.0.0
 
 # ─── Criptografia ────────────────────────────────────────────────
 # ECDSA secp256k1 (mesma curva do Bitcoin) — assinaturas de transações
