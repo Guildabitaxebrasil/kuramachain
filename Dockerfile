@@ -21,8 +21,8 @@ ENV PORT=10000
 
 WORKDIR /app
 
-# Instalar dependências Python
-COPY requirements.txt ./
+RUN python -m pip install --no-cache-dir gunicorn==23.0.0 \
+    && python -m pip show gunicorn
 
 RUN python -m pip install --no-cache-dir -r requirements.txt \
     && python -m pip show gunicorn
