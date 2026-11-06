@@ -6,6 +6,8 @@
 Flask==3.1.0
 # Suporte a CORS
 Flask-Cors==5.0.1
+# Documentação da API (Swagger/OpenAPI)
+flasgger==0.9.7.1
 # Cliente HTTP para comunicação entre nós P2P
 requests==2.32.3
 # Servidor WSGI de produção (Procfile / Render). O estado da cadeia vive na
