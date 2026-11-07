@@ -18,6 +18,7 @@ from api.routes import create_app
 from core.blockchain import Blockchain
 from core.crypto_utils import CryptoUtils
 from core.wallet import Wallet
+from core.mnemonic import generate_mnemonic, private_key_pem_from_mnemonic
 
 
 class TestAPIChain(unittest.TestCase):
@@ -307,6 +308,31 @@ class TestAPITransactions(unittest.TestCase):
         self.assertIn('message', data)
         self.assertIn('transaction', data)
         self.assertIn('sender_address', data)
+
+    def test_create_signed_transaction_with_mnemonic(self):
+        """Assinar com as 24 palavras funciona sem a chave no cliente."""
+        mnemonic = generate_mnemonic()
+        funded = Wallet(private_key_pem=private_key_pem_from_mnemonic(mnemonic))
+        for _ in range(6):
+            self.client.post('/mine', json={'miner_address': funded.address})
+
+        resp = self.client.post('/api/transactions/create-signed', json={
+            'mnemonic': mnemonic,
+            'receiver': self.wallet.address,
+            'amount': 10.0,
+            'fee': 0.001,
+        })
+        self.assertEqual(resp.status_code, 201, msg=resp.get_json())
+        self.assertEqual(resp.get_json()['sender_address'], funded.address)
+
+    def test_create_signed_transaction_without_signer_is_400(self):
+        """Sem chave privada e sem frase, nada é assinado."""
+        resp = self.client.post('/api/transactions/create-signed', json={
+            'receiver': self.wallet.address,
+            'amount': 1.0,
+        })
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.get_json().get('code'), 'MISSING_SIGNER')
 
     def test_create_signed_transaction_to_evm_address_credits_evm(self):
         """Destino 0x... deve ser creditado também na EVM (visivel na Rabby)."""

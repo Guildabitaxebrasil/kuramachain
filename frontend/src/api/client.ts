@@ -52,7 +52,7 @@ export const getNodes = () => fetchData<NodesResponse>('/api/nodes');
 export const syncNodes = () => postData<{ message: string; chain_replaced: boolean }>('/api/nodes/sync', {});
 
 // Signed transaction (dev helper: server-side signing)
-export const createSignedTransaction = (data: { private_key_pem: string; receiver: string; amount: number; fee?: number }) =>
+export const createSignedTransaction = (data: { private_key_pem?: string; mnemonic?: string; receiver: string; amount: number; fee?: number }) =>
   postData<{
     message: string;
     transaction: Transaction;

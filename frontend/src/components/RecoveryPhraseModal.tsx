@@ -52,9 +52,9 @@ export default function RecoveryPhraseModal({ mnemonic, address, onClose }: Prop
       role="dialog"
       aria-modal="true"
       aria-labelledby="recovery-phrase-title"
-      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/75 backdrop-blur-sm p-4 overflow-y-auto"
+      className="fixed inset-0 z-[60] flex items-start justify-center bg-black/75 backdrop-blur-sm p-4 overflow-y-auto"
     >
-      <div className="bg-kur-bg-card/95 backdrop-blur-xl border border-kur-yellow/40 rounded-2xl w-full max-w-2xl shadow-2xl shadow-glow-sm my-auto">
+      <div className="bg-kur-bg-card/95 backdrop-blur-xl border border-kur-yellow/40 rounded-2xl w-full max-w-2xl shadow-2xl shadow-glow-sm my-auto max-h-[90vh] flex flex-col">
         {/* Header */}
         <div className="flex items-start justify-between gap-4 px-5 sm:px-6 py-4 border-b border-kur-border">
           <div>
@@ -76,7 +76,7 @@ export default function RecoveryPhraseModal({ mnemonic, address, onClose }: Prop
           </button>
         </div>
 
-        <div className="px-5 sm:px-6 py-5 space-y-4">
+        <div className="px-5 sm:px-6 py-5 space-y-4 overflow-y-auto">
           {/* Avisos */}
           <div className="bg-kur-yellow/10 border border-kur-yellow/30 rounded-xl p-4">
             <p className="text-sm font-semibold text-kur-yellow mb-2">

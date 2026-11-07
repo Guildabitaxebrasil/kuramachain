@@ -2066,7 +2066,7 @@ Documentação completa dos endpoints e schemas.
         """
         data = request.get_json()
 
-        required = ['private_key_pem', 'receiver', 'amount']
+        required = ['receiver', 'amount']
         if not data or not all(k in data for k in required):
             missing = [k for k in required if k not in (data or {})]
             return jsonify({
@@ -2074,6 +2074,33 @@ Documentação completa dos endpoints e schemas.
                 'required': required,
                 'missing': missing
             }), 400
+
+        # ─── Chave de assinatura: PEM direto ou frase de recuperação ───
+        # A frase é derivada (BIP39/BIP32) apenas para assinar esta
+        # transação e nunca é devolvida, gravada ou logada — mesma
+        # política de /wallet/restore. Isso permite enviar de uma carteira
+        # criada num nó que não expõe a chave privada (o caso padrão em
+        # produção), onde o navegador só tem as 24 palavras.
+        private_key_pem = data.get('private_key_pem')
+        mnemonic = ' '.join(str(data.get('mnemonic', '')).split()).lower()
+        if not private_key_pem:
+            if not mnemonic:
+                return jsonify({
+                    'error': 'Informe a chave privada ou a frase de recuperação.',
+                    'code': 'MISSING_SIGNER',
+                }), 400
+            if not is_valid_mnemonic(mnemonic):
+                return jsonify({
+                    'error': 'Frase de recuperação inválida. '
+                             'Confira as 24 palavras e a ordem.',
+                    'code': 'INVALID_MNEMONIC',
+                }), 400
+            try:
+                private_key_pem = private_key_pem_from_mnemonic(mnemonic)
+            except Exception:
+                return jsonify({
+                    'error': 'Não foi possível derivar a chave da frase.'
+                }), 400
 
         # ─── PROTEÇÃO: Desabilitar em produção ──────────────────
         # Em produção, a assinatura DEVE ser feita no cliente.
@@ -2087,7 +2114,7 @@ Documentação completa dos endpoints e schemas.
         
         try:
             # Reconstrói a wallet a partir da chave privada
-            wallet = Wallet(private_key_pem=data['private_key_pem'])
+            wallet = Wallet(private_key_pem=private_key_pem)
 
             receiver = data['receiver']
             amount = float(data['amount'])

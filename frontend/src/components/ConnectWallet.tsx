@@ -124,9 +124,9 @@ export default function ConnectWallet() {
           <div
             ref={overlayRef}
             onClick={handleOverlayClick}
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+            className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 backdrop-blur-sm p-4 overflow-y-auto"
           >
-            <div className="bg-kur-bg-card/95 backdrop-blur-xl border border-kur-border rounded-2xl w-full max-w-md shadow-2xl shadow-glow-sm">
+            <div className="bg-kur-bg-card/95 backdrop-blur-xl border border-kur-border rounded-2xl w-full max-w-md shadow-2xl shadow-glow-sm my-auto">
               {/* Header */}
               <div className="flex items-center justify-between px-6 py-4 border-b border-kur-border">
                 <h2 className="text-lg font-bold text-kur-text">Conectar Carteira</h2>

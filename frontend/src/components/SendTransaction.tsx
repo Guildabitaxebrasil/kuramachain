@@ -17,36 +17,64 @@ export default function SendTransaction({ isOpen, onClose, onSuccess, onError }:
   const [fee, setFee] = useState('0.001');
   const [sending, setSending] = useState(false);
   const [customPk, setCustomPk] = useState('');
-  const [useCustom, setUseCustom] = useState(false);
+  const [mnemonic, setMnemonic] = useState('');
+  const [mode, setMode] = useState<'wallets' | 'pem' | 'mnemonic'>('wallets');
   const overlayRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (isOpen) {
-      setWallets(getStoredWallets());
+      const stored = getStoredWallets();
+      setWallets(stored);
       setSelectedWallet('');
       setReceiver('');
       setAmount('');
       setFee('0.001');
       setCustomPk('');
-      setUseCustom(false);
+      setMnemonic('');
+      // Carteira salva sem chave privada não consegue assinar: nesse caso
+      // a frase de recuperação é o único caminho que funciona.
+      setMode(stored.some(w => w.private_key_pem) ? 'wallets' : 'mnemonic');
       setSending(false);
     }
   }, [isOpen]);
 
   const isEvmReceiver = /^0x[0-9a-fA-F]{40}$/.test(receiver.trim());
+  const selected = wallets.find(w => w.address === selectedWallet);
 
   const handleOverlayClick = (e: React.MouseEvent) => {
     if (e.target === overlayRef.current) onClose();
   };
 
   const handleSend = async () => {
-    const pk = useCustom
-      ? customPk.trim()
-      : wallets.find(w => w.address === selectedWallet)?.private_key_pem || '';
+    let payload: { private_key_pem?: string; mnemonic?: string };
 
-    if (!pk) {
-      onError('Selecione uma carteira ou cole uma chave privada.');
-      return;
+    if (mode === 'pem') {
+      const pk = customPk.trim();
+      if (!pk) {
+        onError('Cole a chave privada (PEM) da carteira de origem.');
+        return;
+      }
+      payload = { private_key_pem: pk };
+    } else if (mode === 'mnemonic') {
+      const words = mnemonic.trim().split(/\s+/).filter(Boolean);
+      if (words.length !== 24) {
+        onError('Digite as 24 palavras da frase de recuperação da carteira de origem.');
+        return;
+      }
+      payload = { mnemonic: words.join(' ') };
+    } else {
+      if (!selected) {
+        onError('Selecione a carteira de origem.');
+        return;
+      }
+      if (!selected.private_key_pem) {
+        onError(
+          'Esta carteira foi salva sem a chave privada (o nó não a devolve). ' +
+          'Use a aba "Frase de recuperação" com as 24 palavras dela para enviar.'
+        );
+        return;
+      }
+      payload = { private_key_pem: selected.private_key_pem };
     }
     if (!receiver.trim()) {
       onError('Digite o endereço do destinatário.');
@@ -66,7 +94,7 @@ export default function SendTransaction({ isOpen, onClose, onSuccess, onError }:
     setSending(true);
     try {
       const result = await createSignedTransaction({
-        private_key_pem: pk,
+        ...payload,
         receiver: receiver.trim(),
         amount: amt,
         fee: feeVal,
@@ -113,32 +141,27 @@ export default function SendTransaction({ isOpen, onClose, onSuccess, onError }:
             <label className="block text-sm font-medium text-kur-text mb-1.5">
               Carteira de Origem
             </label>
-            {wallets.length > 0 && (
-              <div className="flex items-center gap-2 mb-2">
+            <div className="flex items-center gap-2 mb-2 flex-wrap">
+              {([
+                ['wallets', 'Suas carteiras'],
+                ['pem', 'Chave privada'],
+                ['mnemonic', 'Frase de recuperação'],
+              ] as const).map(([value, label]) => (
                 <button
-                  onClick={() => setUseCustom(false)}
+                  key={value}
+                  onClick={() => setMode(value)}
                   className={`px-3 py-1 text-xs rounded-lg transition-colors ${
-                    !useCustom
+                    mode === value
                       ? 'bg-kur-accent/20 text-kur-accent border border-kur-accent/30'
                       : 'bg-kur-bg text-kur-text-muted border border-kur-border'
                   }`}
                 >
-                  Suas carteiras
+                  {label}
                 </button>
-                <button
-                  onClick={() => setUseCustom(true)}
-                  className={`px-3 py-1 text-xs rounded-lg transition-colors ${
-                    useCustom
-                      ? 'bg-kur-accent/20 text-kur-accent border border-kur-accent/30'
-                      : 'bg-kur-bg text-kur-text-muted border border-kur-border'
-                  }`}
-                >
-                  Chave privada
-                </button>
-              </div>
-            )}
+              ))}
+            </div>
 
-            {useCustom ? (
+            {mode === 'pem' ? (
               <textarea
                 value={customPk}
                 onChange={e => setCustomPk(e.target.value)}
@@ -146,22 +169,48 @@ export default function SendTransaction({ isOpen, onClose, onSuccess, onError }:
                 rows={3}
                 className="w-full bg-kur-bg border border-kur-border rounded-lg px-3 py-2 text-xs font-mono text-kur-text placeholder-kur-text-muted focus:outline-none focus:border-kur-accent focus:shadow-glow-sm resize-none"
               />
+            ) : mode === 'mnemonic' ? (
+              <div>
+                <textarea
+                  value={mnemonic}
+                  onChange={e => setMnemonic(e.target.value)}
+                  placeholder="As 24 palavras da carteira de origem, separadas por espaço..."
+                  rows={3}
+                  autoComplete="off"
+                  spellCheck={false}
+                  className="w-full bg-kur-bg border border-kur-border rounded-lg px-3 py-2 text-xs font-mono text-kur-text placeholder-kur-text-muted focus:outline-none focus:border-kur-accent focus:shadow-glow-sm resize-none"
+                />
+                <p className="mt-1.5 text-xs text-kur-text-muted">
+                  A frase só é usada para assinar esta transação: o nó não a
+                  grava e ela não fica salva no navegador.
+                </p>
+              </div>
             ) : wallets.length > 0 ? (
-              <select
-                value={selectedWallet}
-                onChange={e => setSelectedWallet(e.target.value)}
-                className="w-full bg-kur-bg border border-kur-border rounded-lg px-3 py-2.5 text-sm text-kur-text focus:outline-none focus:border-kur-accent focus:shadow-glow-sm"
-              >
-                <option value="">Selecione uma carteira...</option>
-                {wallets.map(w => (
-                  <option key={w.address} value={w.address}>
-                    {w.label} — {w.address.slice(0, 16)}...
-                  </option>
-                ))}
-              </select>
+              <div>
+                <select
+                  value={selectedWallet}
+                  onChange={e => setSelectedWallet(e.target.value)}
+                  className="w-full bg-kur-bg border border-kur-border rounded-lg px-3 py-2.5 text-sm text-kur-text focus:outline-none focus:border-kur-accent focus:shadow-glow-sm"
+                >
+                  <option value="">Selecione uma carteira...</option>
+                  {wallets.map(w => (
+                    <option key={w.address} value={w.address}>
+                      {w.label} — {w.address.slice(0, 16)}...
+                    </option>
+                  ))}
+                </select>
+                {selected && !selected.private_key_pem && (
+                  <p className="mt-1.5 text-xs text-kur-yellow">
+                    Esta carteira foi salva sem a chave privada. Use a aba
+                    <strong> Frase de recuperação</strong> com as 24 palavras dela
+                    para poder enviar.
+                  </p>
+                )}
+              </div>
             ) : (
               <p className="text-sm text-kur-text-muted">
-                Nenhuma carteira salva. Vá em <strong>Wallet</strong> e gere uma, ou use "Chave privada" acima.
+                Nenhuma carteira salva. Use a aba <strong>Frase de recuperação</strong> com
+                as 24 palavras da sua carteira.
               </p>
             )}
           </div>
