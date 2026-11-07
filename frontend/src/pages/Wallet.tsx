@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import TransactionTable from '../components/TransactionTable';
 import { getBalance, newWallet, getAllTransactions } from '../api/client';
 import { saveWallet } from '../utils/walletStorage';
@@ -22,13 +23,11 @@ export default function Wallet() {
   const [recoveryPhrase, setRecoveryPhrase] = useState<string | null>(null);
   const [showRestore, setShowRestore] = useState(false);
 
-  // Se tem uma carteira conectada, carrega automaticamente
-  useEffect(() => {
-    if (isConnected && currentAddress && !queryAddress) {
-      setAddress(currentAddress);
-      setQueryAddress(currentAddress);
-    }
-  }, [isConnected, currentAddress]);
+  // O clique numa carteira (busca do topo, "Ir para Carteira" do menu da
+  // carteira conectada) chega como /wallet?address=0x...; sem ler esse
+  // parâmetro a página abria vazia e o card não aparecia.
+  const [searchParams] = useSearchParams();
+  const paramAddress = (searchParams.get('address') || '').trim();
 
   const fetchWalletData = (addr: string) => {
     setLoading(true);
@@ -55,6 +54,19 @@ export default function Wallet() {
       .catch((err: any) => setError(err.message || 'Erro ao consultar endereço'))
       .finally(() => setLoading(false));
   };
+
+  // Endereço da URL tem prioridade; sem ele, usa a carteira conectada.
+  // Sempre busca os dados: antes o card aparecia com saldo 0.00 porque
+  // ninguém disparava a consulta ao abrir a página.
+  useEffect(() => {
+    const target = paramAddress || (isConnected && currentAddress ? currentAddress : '');
+    if (!target) return;
+    setAddress(target);
+    setQueryAddress(target);
+    fetchWalletData(target);
+    // fetchWalletData é recriado a cada render; as deps reais são estas.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paramAddress, isConnected, currentAddress]);
 
   const handleSearch = () => {
     if (!address.trim()) return;
