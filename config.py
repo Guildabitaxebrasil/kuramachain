@@ -115,6 +115,12 @@ DATA_DIR = _env('DATA_DIR', 'data')
 CHAIN_FILE = _env('CHAIN_FILE', 'data/blockchain.json')
 WALLET_FILE = _env('WALLET_FILE', 'data/wallet.json')
 
+# Identidade fixa do nó: frase de 24 palavras (BIP39) que deriva a carteira
+# mineradora. Necessária onde o disco é efêmero (Render free): WALLET_FILE
+# desaparece a cada deploy, mas a variável de ambiente não. Vazio = usa o
+# arquivo (ou gera uma carteira nova na primeira execução).
+NODE_MNEMONIC = _env('KURAMA_NODE_MNEMONIC', '')
+
 # ─── Backup remoto da cadeia ──────────────────────────────────────
 # O plano free do Render recria o container a cada deploy/restart/spin-down
 # e o disco é efêmero, então a cadeia é espelhada num Postgres externo

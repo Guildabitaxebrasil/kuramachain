@@ -47,3 +47,9 @@ services:
       # dashboard em vez de guardá-lo no repositório.
       # - key: KURAMA_BACKUP_DATABASE_URL
       #   sync: false
+      # Identidade fixa do nó: cole aqui as 24 palavras da carteira que
+      # minera. Sem isso o endereço minerador é lido de WALLET_FILE, que
+      # no plano free desaparece a cada deploy (endereço muda e as
+      # recompensas já mineradas ficam órfãs).
+      # - key: KURAMA_NODE_MNEMONIC
+      #   sync: false

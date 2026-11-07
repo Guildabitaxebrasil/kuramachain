@@ -20,7 +20,7 @@ from api.routes import create_app
 from core.blockchain import Blockchain
 from core.wallet import Wallet
 from core.chain_backup import ChainBackup, backup_chain, restore_chain
-from config import DEFAULT_DIFFICULTY, CHAIN_FILE
+from config import DEFAULT_DIFFICULTY, CHAIN_FILE, WALLET_FILE
 
 # ─── Espelho remoto ───────────────────────────────────────────────
 # No plano free do Render o disco é efêmero: antes de carregar, puxa a
@@ -43,8 +43,12 @@ except Exception as e:
     blockchain = Blockchain(difficulty=DEFAULT_DIFFICULTY)
     print(f"[WARN] Falha ao carregar {CHAIN_FILE} ({e}); começando do gênese")
 
-wallet = Wallet()
+# Carteira do nó persistida: o endereço minerador tem que sobreviver ao
+# restart. Antes era `Wallet()` puro, então cada boot minerava para um
+# endereço novo e as recompensas ficavam órfãs.
+wallet = Wallet.load_or_create(WALLET_FILE)
 miner_address = wallet.address
+print(f"[WALLET] Endereço minerador do nó: {miner_address}")
 
 
 def _persist_chain(*_args, **_kwargs):

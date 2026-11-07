@@ -151,6 +151,91 @@ class Wallet:
         """Reconstrói uma carteira a partir de dados salvos."""
         return cls(private_key_pem=data['private_key'])
 
+    # ─── Persistência da carteira do nó ───────────────────────────
+    # Sem isso o processo do nó gerava um par de chaves novo a cada boot:
+    # o endereço minerador mudava a cada restart e as recompensas já
+    # mineradas ficavam em endereços que o nó não conhecia mais.
+
+    def save_to_file(self, filepath: str = None):
+        """
+        Grava a carteira (com a chave privada) em `filepath`.
+
+        O arquivo fica com permissão 0600 onde o sistema suporta. É um
+        segredo local: nunca versionar nem servir por HTTP.
+        """
+        import json, os, uuid
+        from config import WALLET_FILE
+
+        filepath = filepath or WALLET_FILE
+        directory = os.path.dirname(os.path.abspath(filepath))
+        os.makedirs(directory, exist_ok=True)
+
+        # Escrita atômica: um crash no meio não corrompe a carteira salva.
+        tmp_path = os.path.join(directory, f'.{uuid.uuid4().hex}.tmp')
+        try:
+            with open(tmp_path, 'w', encoding='utf-8') as f:
+                json.dump(self.to_dict(), f, indent=2)
+            try:
+                os.chmod(tmp_path, 0o600)
+            except OSError:
+                pass  # Windows não aplica o modo POSIX
+            os.replace(tmp_path, filepath)
+        finally:
+            if os.path.exists(tmp_path):
+                try:
+                    os.remove(tmp_path)
+                except OSError:
+                    pass
+
+    @classmethod
+    def load_from_file(cls, filepath: str = None) -> 'Wallet':
+        """Carrega a carteira salva por `save_to_file`."""
+        import json
+        from config import WALLET_FILE
+
+        filepath = filepath or WALLET_FILE
+        with open(filepath, 'r', encoding='utf-8') as f:
+            return cls.from_dict(json.load(f))
+
+    @classmethod
+    def load_or_create(cls, filepath: str = None) -> 'Wallet':
+        """
+        Devolve a carteira do nó, criando e salvando na primeira execução.
+
+        A identidade do nó (endereço minerador) precisa ser estável entre
+        reinícios, então a carteira é lida de `filepath` (WALLET_FILE).
+        Se a variável KURAMA_NODE_MNEMONIC estiver definida, a carteira é
+        derivada dela em vez do arquivo — é o que mantém o endereço fixo
+        num host com disco efêmero (plano free do Render), onde o arquivo
+        desaparece a cada deploy.
+
+        Arquivo ilegível/corrompido gera uma carteira nova com warning, em
+        vez de derrubar o nó.
+        """
+        import os
+        from config import NODE_MNEMONIC, WALLET_FILE
+
+        if NODE_MNEMONIC:
+            from .mnemonic import private_key_pem_from_mnemonic
+            return cls(private_key_pem=private_key_pem_from_mnemonic(NODE_MNEMONIC))
+
+        filepath = filepath or WALLET_FILE
+        if os.path.exists(filepath):
+            try:
+                return cls.load_from_file(filepath)
+            except Exception as e:
+                print(f'[WARN] Não foi possível ler a carteira em {filepath} ({e}); '
+                      'gerando uma nova')
+
+        wallet = cls()
+        try:
+            wallet.save_to_file(filepath)
+            print(f'[WALLET] Carteira do nó criada e salva em {filepath}')
+        except OSError as e:
+            print(f'[WARN] Não foi possível salvar a carteira em {filepath} ({e}); '
+                  'o endereço vai mudar no próximo boot')
+        return wallet
+
     # ─── Criptografia de Wallet (AES-256-GCM) ─────────────────────
     # A carteira em repouso é protegida com:
     # - PBKDF2-HMAC-SHA256 (100k iterações) para derivação de chave
