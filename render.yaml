@@ -7,27 +7,20 @@
 # Deploy: no Render, New > Blueprint, aponte para este repositório.
 # Nenhuma variável secreta é necessária para um nó único.
 #
-# Persistência: a cadeia e a mempool vivem na memória do processo, então o
-# nó grava CHAIN_FILE a cada bloco aceito. O disco do container é efêmero
-# (some em deploy, restart e spin-down), por isso o volume persistente
-# abaixo, montado em /var/data. Disco no Render só existe em plano pago —
-# o free recusa `disk:` — então o plano aqui é `starter` (US$7/mês) mais
-# US$0,25/GB/mês do disco de 1GB.
+# Persistência: o nó carrega CHAIN_FILE no boot e regrava a cada bloco
+# aceito. No plano free o disco do container é efêmero — deploy, restart e
+# spin-down por inatividade apagam o arquivo — e disco persistente só
+# existe em serviço pago, então NÃO há `disk:` aqui de propósito. Enquanto
+# o serviço for free, a cadeia só sobrevive a restarts com um armazenamento
+# externo (banco/objeto) configurado no ambiente.
 services:
   - type: web
     name: kuramachain
     runtime: docker
-    plan: starter
+    plan: free
     dockerfilePath: ./Dockerfile
     healthCheckPath: /api/health
     autoDeploy: true
-    # Só o que está sob mountPath sobrevive a deploy/restart/spin-down.
-    # Serviço com disco não escala horizontalmente — e o nó é 1 worker de
-    # propósito, porque a cadeia vive na memória do processo.
-    disk:
-      name: kuramachain-data
-      mountPath: /var/data
-      sizeGB: 1
     envVars:
       # Demonstração pública: /wallet/new NÃO devolve a chave privada
       # (KURAMA_DEV_EXPOSE_KEYS fica no default false). O envio de
@@ -38,11 +31,10 @@ services:
       # Opt-in explícito desligado: /wallet/new não devolve chave privada.
       - key: KURAMA_DEV_EXPOSE_KEYS
         value: "false"
-      # Estado persistente no volume, nunca no /app (efêmero).
       - key: DATA_DIR
-        value: /var/data
+        value: data
       - key: CHAIN_FILE
-        value: /var/data/blockchain.json
+        value: data/blockchain.json
       # No Render, remote_addr é o proxy. TRUST_PROXY_HEADERS habilita
       # a leitura de X-Forwarded-For para obter o IP real do cliente.
       # Sem isso, todos compartilham um único bucket de rate limit.
