@@ -19,12 +19,35 @@ except AttributeError:
 from api.routes import create_app
 from core.blockchain import Blockchain
 from core.wallet import Wallet
-from config import DEFAULT_DIFFICULTY
+from config import DEFAULT_DIFFICULTY, CHAIN_FILE
 
-# ─── Cria blockchain e carteira do nó ────────────────────────────
-blockchain = Blockchain(difficulty=DEFAULT_DIFFICULTY)
+# ─── Carrega a cadeia do disco ────────────────────────────────────
+# Sem isso o processo nascia sempre do gênese: cada restart (deploy,
+# spin-down, reload do worker do gunicorn) apagava blocos e saldos.
+try:
+    blockchain = Blockchain.load_from_file(CHAIN_FILE, difficulty=DEFAULT_DIFFICULTY)
+    print(f"[LOAD] Cadeia carregada de {CHAIN_FILE} "
+          f"({len(blockchain.chain)} blocos)")
+except FileNotFoundError:
+    blockchain = Blockchain(difficulty=DEFAULT_DIFFICULTY)
+    print(f"[GENESIS] Nenhuma cadeia em {CHAIN_FILE}; começando do gênese")
+except Exception as e:
+    blockchain = Blockchain(difficulty=DEFAULT_DIFFICULTY)
+    print(f"[WARN] Falha ao carregar {CHAIN_FILE} ({e}); começando do gênese")
+
 wallet = Wallet()
 miner_address = wallet.address
+
+
+def _persist_chain(*_args, **_kwargs):
+    """Autosave: grava a cadeia a cada bloco aceito (minerado ou P2P)."""
+    try:
+        blockchain.save_to_file(CHAIN_FILE)
+    except Exception as e:
+        print(f"[WARN] Autosave falhou: {e}")
+
+
+blockchain.on('on_block_mined', _persist_chain)
 
 # ─── Cria a aplicação Flask ───────────────────────────────────────
 app = create_app(

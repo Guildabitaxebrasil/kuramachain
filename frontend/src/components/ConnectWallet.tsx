@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { useWallet } from '../context/WalletContext';
 import { getBalance } from '../api/client';
@@ -120,7 +121,10 @@ export default function ConnectWallet() {
           <span className="hidden md:inline">Conectar</span>
         </button>
 
-        {showModal && (
+        {/* Portal no <body>: o header tem backdrop-blur (que confina
+            position: fixed) e z-index próprio, então o modal ficava
+            preso dentro da faixa de 64px do topo, atrás do logo. */}
+        {showModal && createPortal(
           <div
             ref={overlayRef}
             onClick={handleOverlayClick}
@@ -350,7 +354,8 @@ export default function ConnectWallet() {
                 )}
               </div>
             </div>
-          </div>
+          </div>,
+          document.body
         )}
       </>
     );

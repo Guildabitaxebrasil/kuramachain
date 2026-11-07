@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { createPortal } from 'react-dom';
 import RecoveryPhraseModal from './RecoveryPhraseModal';
 import { hasSeedBackup, loadSeedBackup } from '../utils/seedVault';
 
@@ -48,7 +49,9 @@ export default function ExportPhraseModal({ address, onClose }: Props) {
     );
   }
 
-  return (
+  // Portal no <body>: aberto de dentro do header (backdrop-blur + z-index),
+  // que confina `position: fixed` e escondia o modal atrás do logo.
+  return createPortal(
     <div
       role="dialog"
       aria-modal="true"
@@ -135,6 +138,7 @@ export default function ExportPhraseModal({ address, onClose }: Props) {
           )}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

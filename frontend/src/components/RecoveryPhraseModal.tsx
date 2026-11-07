@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { saveSeedBackup } from '../utils/seedVault';
 
 interface Props {
@@ -47,7 +48,11 @@ export default function RecoveryPhraseModal({ mnemonic, address, onClose }: Prop
     }
   };
 
-  return (
+  // Portal no <body>: o modal é aberto a partir do header (que tem
+  // backdrop-blur + z-index) e de páginas com animação de transform.
+  // Esses dois contextos confinam `position: fixed`, então sem o portal o
+  // overlay ficava espremido dentro do elemento pai e atrás da imagem.
+  return createPortal(
     <div
       role="dialog"
       aria-modal="true"
@@ -181,6 +186,7 @@ export default function RecoveryPhraseModal({ mnemonic, address, onClose }: Prop
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

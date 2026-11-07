@@ -24,9 +24,17 @@ services:
       # Opt-in explícito desligado: /wallet/new não devolve chave privada.
       - key: KURAMA_DEV_EXPOSE_KEYS
         value: "false"
-      # O disco do container é efêmero: a cadeia reinicia no gênese a
-      # cada deploy/restart. Para persistir, use um plano com disco ou
-      # um volume externo e aponte CHAIN_FILE para ele.
+      # O nó carrega a cadeia de CHAIN_FILE no boot e regrava a cada bloco,
+      # mas no plano free o disco do container é efêmero: deploy, restart e
+      # spin-down por inatividade apagam o arquivo. Para manter a cadeia de
+      # verdade, crie um disco persistente (planos pagos) e monte em /var/data:
+      #
+      #   disk:
+      #     name: kuramachain-data
+      #     mountPath: /var/data
+      #     sizeGB: 1
+      #
+      # e troque CHAIN_FILE para /var/data/blockchain.json.
       - key: DATA_DIR
         value: data
       - key: CHAIN_FILE
