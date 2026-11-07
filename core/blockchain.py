@@ -20,7 +20,8 @@ from config import (
     INITIAL_BLOCK_REWARD, HALVING_INTERVAL, TOTAL_SUPPLY_CAP,
     MIN_TRANSACTION_AMOUNT, MIN_TRANSACTION_FEE, COINBASE_SENDER,
     TOKEN_NAME, TOKEN_SYMBOL,
-    DIFFICULTY_ADJUST_INTERVAL, TARGET_BLOCK_TIME, MAX_DIFFICULTY_JUMP
+    DIFFICULTY_ADJUST_INTERVAL, TARGET_BLOCK_TIME, MAX_DIFFICULTY_JUMP,
+    CHAIN_FILE
 )
 
 
@@ -1168,7 +1169,7 @@ class Blockchain:
 
     # ─── Persistência (JSON) ──────────────────────────────────────
 
-    def save_to_file(self, filepath: str = 'data/blockchain.json'):
+    def save_to_file(self, filepath: str = None):
         """
         Salva a blockchain em um arquivo JSON.
 
@@ -1181,8 +1182,14 @@ class Blockchain:
         }
 
         Args:
-            filepath: Caminho do arquivo para salvar
+            filepath: Caminho do arquivo para salvar (padrão: CHAIN_FILE)
         """
+        # Usa CHAIN_FILE quando ninguém passa caminho: quem salva a cadeia
+        # após consenso chamava save_to_file() sem argumento e gravava em
+        # data/blockchain.json mesmo com CHAIN_FILE apontando para o volume
+        # persistente — a cadeia ia para o disco efêmero e se perdia.
+        filepath = filepath or CHAIN_FILE
+
         # Garante que o diretório existe
         os.makedirs(os.path.dirname(filepath), exist_ok=True)
 
@@ -1220,13 +1227,13 @@ class Blockchain:
               f"{len(self.pending_transactions)} transações pendentes)")
 
     @classmethod
-    def load_from_file(cls, filepath: str = 'data/blockchain.json',
+    def load_from_file(cls, filepath: str = None,
                        difficulty: int = 4) -> 'Blockchain':
         """
         Carrega a blockchain de um arquivo JSON.
 
         Args:
-            filepath: Caminho do arquivo
+            filepath: Caminho do arquivo (padrão: CHAIN_FILE)
             difficulty: Dificuldade padrão (usada se não salva)
 
         Returns:
@@ -1235,6 +1242,8 @@ class Blockchain:
         Raises:
             FileNotFoundError: Se o arquivo não existe
         """
+        filepath = filepath or CHAIN_FILE
+
         if not os.path.exists(filepath):
             raise FileNotFoundError(f"Arquivo não encontrado: {filepath}")
 
