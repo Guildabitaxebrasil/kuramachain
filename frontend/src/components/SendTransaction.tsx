@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { createSignedTransaction } from '../api/client';
+import { createSignedTransaction, restoreWallet } from '../api/client';
 import { getStoredWallets, type StoredWallet } from '../utils/walletStorage';
 
 interface Props {
@@ -19,6 +19,11 @@ export default function SendTransaction({ isOpen, onClose, onSuccess, onError }:
   const [customPk, setCustomPk] = useState('');
   const [mnemonic, setMnemonic] = useState('');
   const [mode, setMode] = useState<'wallets' | 'pem' | 'mnemonic'>('wallets');
+  /* Carteira salva sem chave privada escolhida como origem: a frase
+     digitada precisa ser dela, senão a transação sairia de outra conta. */
+  const [originAddress, setOriginAddress] = useState('');
+  /* Endereço derivado das 24 palavras, mostrado antes de enviar. */
+  const [derivedAddress, setDerivedAddress] = useState('');
   const overlayRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -31,6 +36,8 @@ export default function SendTransaction({ isOpen, onClose, onSuccess, onError }:
       setFee('0.001');
       setCustomPk('');
       setMnemonic('');
+      setOriginAddress('');
+      setDerivedAddress('');
       // Carteira salva sem chave privada não consegue assinar: nesse caso
       // a frase de recuperação é o único caminho que funciona.
       setMode(stored.some(w => w.private_key_pem) ? 'wallets' : 'mnemonic');
@@ -40,6 +47,27 @@ export default function SendTransaction({ isOpen, onClose, onSuccess, onError }:
 
   const isEvmReceiver = /^0x[0-9a-fA-F]{40}$/.test(receiver.trim());
   const selected = wallets.find(w => w.address === selectedWallet);
+
+  // Deriva o endereço das 24 palavras enquanto o usuário digita, para
+  // confirmar que são da carteira de origem escolhida.
+  useEffect(() => {
+    if (mode !== 'mnemonic') {
+      setDerivedAddress('');
+      return;
+    }
+    const words = mnemonic.trim().split(/\s+/).filter(Boolean);
+    if (words.length !== 24) {
+      setDerivedAddress('');
+      return;
+    }
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      restoreWallet(words.join(' '))
+        .then(info => { if (!cancelled) setDerivedAddress(info.address); })
+        .catch(() => { if (!cancelled) setDerivedAddress(''); });
+    }, 400);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [mnemonic, mode]);
 
   const handleOverlayClick = (e: React.MouseEvent) => {
     if (e.target === overlayRef.current) onClose();
@@ -59,6 +87,13 @@ export default function SendTransaction({ isOpen, onClose, onSuccess, onError }:
       const words = mnemonic.trim().split(/\s+/).filter(Boolean);
       if (words.length !== 24) {
         onError('Digite as 24 palavras da frase de recuperação da carteira de origem.');
+        return;
+      }
+      if (originAddress && derivedAddress && derivedAddress !== originAddress) {
+        onError(
+          `Estas 24 palavras são da carteira ${derivedAddress}, não de ${originAddress}. ` +
+          'Confira as palavras ou selecione a carteira certa.'
+        );
         return;
       }
       payload = { mnemonic: words.join(' ') };
@@ -171,6 +206,12 @@ export default function SendTransaction({ isOpen, onClose, onSuccess, onError }:
               />
             ) : mode === 'mnemonic' ? (
               <div>
+                {originAddress && (
+                  <p className="mb-1.5 text-xs text-kur-text-muted">
+                    Carteira de origem:{' '}
+                    <span className="font-mono text-kur-text">{originAddress}</span>
+                  </p>
+                )}
                 <textarea
                   value={mnemonic}
                   onChange={e => setMnemonic(e.target.value)}
@@ -180,6 +221,20 @@ export default function SendTransaction({ isOpen, onClose, onSuccess, onError }:
                   spellCheck={false}
                   className="w-full bg-kur-bg border border-kur-border rounded-lg px-3 py-2 text-xs font-mono text-kur-text placeholder-kur-text-muted focus:outline-none focus:border-kur-accent focus:shadow-glow-sm resize-none"
                 />
+                {derivedAddress && (
+                  derivedAddress === originAddress || !originAddress ? (
+                    <p className="mt-1.5 text-xs text-kur-green">
+                      ✅ As 24 palavras são da carteira{' '}
+                      <span className="font-mono">{derivedAddress}</span>.
+                    </p>
+                  ) : (
+                    <p className="mt-1.5 text-xs text-kur-yellow">
+                      ⚠️ Estas palavras são da carteira{' '}
+                      <span className="font-mono">{derivedAddress}</span>, não de{' '}
+                      <span className="font-mono">{originAddress}</span>.
+                    </p>
+                  )
+                )}
                 <p className="mt-1.5 text-xs text-kur-text-muted">
                   A frase só é usada para assinar esta transação: o nó não a
                   grava e ela não fica salva no navegador.
@@ -200,11 +255,21 @@ export default function SendTransaction({ isOpen, onClose, onSuccess, onError }:
                   ))}
                 </select>
                 {selected && !selected.private_key_pem && (
-                  <p className="mt-1.5 text-xs text-kur-yellow">
-                    Esta carteira foi salva sem a chave privada. Use a aba
-                    <strong> Frase de recuperação</strong> com as 24 palavras dela
-                    para poder enviar.
-                  </p>
+                  <div className="mt-1.5">
+                    <p className="text-xs text-kur-yellow">
+                      Esta carteira foi salva sem a chave privada (o nó não a devolve).
+                    </p>
+                    <button
+                      onClick={() => {
+                        setOriginAddress(selected.address);
+                        setMnemonic('');
+                        setMode('mnemonic');
+                      }}
+                      className="mt-1.5 px-3 py-1 text-xs rounded-lg bg-kur-accent/20 text-kur-accent border border-kur-accent/30 hover:bg-kur-accent/30 transition-colors"
+                    >
+                      Usar as 24 palavras desta carteira
+                    </button>
+                  </div>
                 )}
               </div>
             ) : (
