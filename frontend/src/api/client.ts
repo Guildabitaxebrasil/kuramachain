@@ -70,6 +70,30 @@ export const getStats = () => fetchData<Stats>('/stats');
 export const getSupply = () => fetchData<SupplyResponse>('/api/supply');
 export const getChartData = (limit?: number) => fetchData<ChartDataPoint[]>('/api/chart', { limit });
 export const getMempoolStats = () => fetchData<MempoolStats>('/api/mempool');
-export const search = (q: string) => fetchData<SearchResult>('/api/search', { q });
+/**
+ * Busca unificada.
+ *
+ * O backend responde um único resultado no formato `{type, data, url}`,
+ * mas a barra de busca trabalha com listas (`blocks`, `transactions`,
+ * `addresses`). Sem esta normalização o dropdown ficava sempre em
+ * "Nenhum resultado encontrado" e não dava para clicar no endereço.
+ */
+export const search = async (q: string): Promise<SearchResult> => {
+  const res = await fetchData<any>('/api/search', { q });
+  if (res && (Array.isArray(res.blocks) || Array.isArray(res.addresses))) {
+    return res as SearchResult;
+  }
+  const empty: SearchResult = { blocks: [], transactions: [], addresses: [] };
+  if (res?.type === 'address' && res.data?.address) {
+    return { ...empty, addresses: [res.data.address] };
+  }
+  if (res?.type === 'block' && res.data) {
+    return { ...empty, blocks: [res.data] };
+  }
+  if (res?.type === 'transaction' && res.data) {
+    return { ...empty, transactions: [res.data] };
+  }
+  return empty;
+};
 export const getHealth = () => fetchData<HealthResponse>('/api/health');
 export const validateChain = () => fetchData<{ valid: boolean; errors: string[] }>('/validate');
