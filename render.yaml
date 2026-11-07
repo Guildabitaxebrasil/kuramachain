@@ -40,3 +40,10 @@ services:
       # Sem isso, todos compartilham um único bucket de rate limit.
       - key: TRUST_PROXY_HEADERS
         value: "true"
+      # Espelho remoto da cadeia (ver core/chain_backup.py): cole aqui a
+      # connection string de um Postgres externo gratuito (Neon, Supabase).
+      # Sem ela o nó roda igual, mas a cadeia volta ao gênese quando o
+      # container é recriado. `sync: false` faz o Render pedir o valor no
+      # dashboard em vez de guardá-lo no repositório.
+      # - key: KURAMA_BACKUP_DATABASE_URL
+      #   sync: false

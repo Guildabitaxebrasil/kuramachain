@@ -19,7 +19,15 @@ except AttributeError:
 from api.routes import create_app
 from core.blockchain import Blockchain
 from core.wallet import Wallet
+from core.chain_backup import ChainBackup, backup_chain, restore_chain
 from config import DEFAULT_DIFFICULTY, CHAIN_FILE
+
+# ─── Espelho remoto ───────────────────────────────────────────────
+# No plano free do Render o disco é efêmero: antes de carregar, puxa a
+# cadeia do banco remoto (se ela estiver à frente do arquivo local).
+chain_backup = ChainBackup.from_env()
+if chain_backup:
+    restore_chain(chain_backup, CHAIN_FILE)
 
 # ─── Carrega a cadeia do disco ────────────────────────────────────
 # Sem isso o processo nascia sempre do gênese: cada restart (deploy,
@@ -45,6 +53,9 @@ def _persist_chain(*_args, **_kwargs):
         blockchain.save_to_file(CHAIN_FILE)
     except Exception as e:
         print(f"[WARN] Autosave falhou: {e}")
+        return
+    # Disco do Render free é efêmero: mantém a cópia no banco remoto.
+    backup_chain(chain_backup, CHAIN_FILE)
 
 
 blockchain.on('on_block_mined', _persist_chain)

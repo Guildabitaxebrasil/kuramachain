@@ -115,6 +115,13 @@ DATA_DIR = _env('DATA_DIR', 'data')
 CHAIN_FILE = _env('CHAIN_FILE', 'data/blockchain.json')
 WALLET_FILE = _env('WALLET_FILE', 'data/wallet.json')
 
+# ─── Backup remoto da cadeia ──────────────────────────────────────
+# O plano free do Render recria o container a cada deploy/restart/spin-down
+# e o disco é efêmero, então a cadeia é espelhada num Postgres externo
+# (Neon free, por exemplo). Vazio = backup desligado, só arquivo local.
+BACKUP_DATABASE_URL = _env('KURAMA_BACKUP_DATABASE_URL', '')
+BACKUP_TIMEOUT = _env('KURAMA_BACKUP_TIMEOUT', 10)  # segundos de conexão
+
 # ─── Ajuste de Dificuldade ───────────────────────────────────────
 # Ritmo de blocos da rede, como o alvo de 10 minutos do Bitcoin.
 # O nó recusa um bloco novo antes de `TARGET_BLOCK_TIME` segundos contados

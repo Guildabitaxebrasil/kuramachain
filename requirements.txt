@@ -32,6 +32,10 @@ py-evm>=0.12.0b1
 # py-solc-x — compilação de contratos Solidity (baixa o solc)
 py-solc-x>=2.0.0
 
+# ─── Backup remoto da cadeia (opcional) ──────────────────────────
+# Espelha a cadeia num Postgres externo: o disco do Render free é efêmero.
+psycopg2-binary>=2.9.9
+
 # ─── Utilitários ─────────────────────────────────────────────────
 # python-dotenv para carregar .env
 dotenv>=0.9.9
