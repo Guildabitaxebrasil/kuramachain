@@ -2,7 +2,6 @@ import { useState, useEffect, useRef } from 'react';
 import { createSignedTransaction } from '../api/client';
 import { getStoredWallets, type StoredWallet } from '../utils/walletStorage';
 import { useWallet } from '../context/WalletContext';
-import RestoreWalletForm from './RestoreWalletForm';
 
 interface Props {
   isOpen: boolean;
@@ -19,10 +18,6 @@ export default function SendTransaction({ isOpen, onClose, onSuccess, onError }:
   const [amount, setAmount] = useState('');
   const [fee, setFee] = useState('0.001');
   const [sending, setSending] = useState(false);
-  const [customPk, setCustomPk] = useState('');
-  const [mode, setMode] = useState<'wallets' | 'pem'>('wallets');
-  /* Restauração da própria carteira sem chave, aqui mesmo no modal. */
-  const [restoring, setRestoring] = useState(false);
   /* Etapa do modal: preenche os dados e só envia depois de conferir e
      confirmar o endereço de destino. */
   const [step, setStep] = useState<'form' | 'confirm'>('form');
@@ -36,14 +31,10 @@ export default function SendTransaction({ isOpen, onClose, onSuccess, onError }:
       setReceiver('');
       setAmount('');
       setFee('0.001');
-      setCustomPk('');
       setStep('form');
       setSending(false);
-      setRestoring(false);
-      const canSign = stored.filter(w => w.private_key_pem);
-      setMode(canSign.length > 0 ? 'wallets' : 'pem');
       // Carteira conectada já vem escolhida como origem.
-      if (currentAddress && canSign.some(w => w.address === currentAddress)) {
+      if (currentAddress && stored.some(w => w.address === currentAddress)) {
         setSelectedWallet(currentAddress);
       }
     }
@@ -51,46 +42,17 @@ export default function SendTransaction({ isOpen, onClose, onSuccess, onError }:
 
   const isEvmReceiver = /^0x[0-9a-fA-F]{40}$/.test(receiver.trim());
   const selected = wallets.find(w => w.address === selectedWallet);
-  const originLabel =
-    mode === 'pem'
-      ? 'Chave privada informada (PEM)'
-      : selected?.address || '';
+  const originLabel = selected?.address || '';
 
   const handleOverlayClick = (e: React.MouseEvent) => {
     if (e.target === overlayRef.current) onClose();
   };
 
-  /**
-   * Depois de restaurar, recarrega as carteiras salvas e já escolhe a
-   * restaurada como origem: a chave acabou de ser gravada no navegador.
-   */
-  const handleRestored = (address: string) => {
-    const stored = getStoredWallets();
-    setWallets(stored);
-    if (stored.some(w => w.address === address)) setSelectedWallet(address);
-    setRestoring(false);
-  };
-
   /** Valida o formulário e avança para a confirmação. */
   const handleReview = () => {
-    if (mode === 'pem') {
-      if (!customPk.trim()) {
-        onError('Cole a chave privada (PEM) da carteira de origem.');
-        return;
-      }
-    } else {
-      if (!selected) {
-        onError('Selecione a carteira de origem.');
-        return;
-      }
-      if (!selected.private_key_pem) {
-        onError(
-          'Esta carteira foi salva sem a chave privada. ' +
-          'Use "Restaurar esta carteira" com as 24 palavras uma única vez: ' +
-          'a chave fica salva aqui e os próximos envios não pedem mais as palavras.'
-        );
-        return;
-      }
+    if (!selected) {
+      onError('Selecione a carteira de origem.');
+      return;
     }
     if (!receiver.trim()) {
       onError('Digite o endereço do destinatário.');
@@ -110,8 +72,10 @@ export default function SendTransaction({ isOpen, onClose, onSuccess, onError }:
   };
 
   const handleSend = async () => {
-    const payload: { private_key_pem: string; receiver: string; amount: number; fee: number } = {
-      private_key_pem: mode === 'pem' ? customPk.trim() : (selected?.private_key_pem || ''),
+    // Só o endereço de origem vai para o servidor: a chave privada fica no
+    // cofre do nó e é usada lá mesmo para assinar a transação.
+    const payload = {
+      from_address: selected?.address || '',
       receiver: receiver.trim(),
       amount: parseFloat(amount),
       fee: parseFloat(fee),
@@ -198,34 +162,7 @@ export default function SendTransaction({ isOpen, onClose, onSuccess, onError }:
               <label className="block text-sm font-medium text-kur-text mb-1.5">
                 Carteira de Origem
               </label>
-              <div className="flex items-center gap-2 mb-2 flex-wrap">
-                {([
-                  ['wallets', 'Suas carteiras'],
-                  ['pem', 'Chave privada'],
-                ] as const).map(([value, label]) => (
-                  <button
-                    key={value}
-                    onClick={() => setMode(value)}
-                    className={`px-3 py-1 text-xs rounded-lg transition-colors ${
-                      mode === value
-                        ? 'bg-kur-accent/20 text-kur-accent border border-kur-accent/30'
-                        : 'bg-kur-bg text-kur-text-muted border border-kur-border'
-                    }`}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-
-              {mode === 'pem' ? (
-                <textarea
-                  value={customPk}
-                  onChange={e => setCustomPk(e.target.value)}
-                  placeholder="Cole a chave privada (PEM)..."
-                  rows={3}
-                  className="w-full bg-kur-bg border border-kur-border rounded-lg px-3 py-2 text-xs font-mono text-kur-text placeholder-kur-text-muted focus:outline-none focus:border-kur-accent focus:shadow-glow-sm resize-none"
-                />
-              ) : wallets.length > 0 ? (
+              {wallets.length > 0 ? (
                 <div>
                   <select
                     value={selectedWallet}
@@ -245,29 +182,12 @@ export default function SendTransaction({ isOpen, onClose, onSuccess, onError }:
                       <span className="font-mono text-kur-text">{selected.address}</span>
                     </p>
                   )}
-                  {selected && !selected.private_key_pem && (
-                    <div className="mt-2 rounded-lg border border-kur-yellow/30 bg-kur-yellow/5 p-3">
-                      <p className="text-xs text-kur-yellow">
-                        Esta carteira foi salva sem a chave privada. Restaure-a uma única
-                        vez com as 24 palavras: a chave fica salva neste navegador e os
-                        próximos envios não pedem mais as palavras.
-                      </p>
-                      {restoring ? (
-                        <div className="mt-3">
-                          <RestoreWalletForm
-                            onRestored={handleRestored}
-                            onCancel={() => setRestoring(false)}
-                          />
-                        </div>
-                      ) : (
-                        <button
-                          onClick={() => setRestoring(true)}
-                          className="mt-2 px-3 py-1.5 text-xs font-semibold rounded-lg bg-kur-gradient text-white hover:brightness-110 transition-all"
-                        >
-                          Restaurar esta carteira
-                        </button>
-                      )}
-                    </div>
+                  {selected && (
+                    <p className="mt-1.5 text-xs text-kur-text-muted">
+                      A transação é assinada pelo nó para este endereço — a chave privada
+                      não fica no navegador. Se a carteira foi criada em outra máquina,
+                      restaure-a uma vez em <strong>Conectar</strong> com as 24 palavras.
+                    </p>
                   )}
                 </div>
               ) : (

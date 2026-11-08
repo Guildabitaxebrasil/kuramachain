@@ -14,6 +14,13 @@ import json
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
+# Cofre das carteiras num diretório temporário: os testes não escrevem no
+# data/wallets.json do projeto. Precisa vir antes do import da API.
+os.environ.setdefault(
+    'KURAMA_WALLETS_FILE',
+    os.path.join(tempfile.mkdtemp(prefix='kurama-vault-'), 'wallets.json'),
+)
+
 from api.routes import create_app
 from core.blockchain import Blockchain
 from core.crypto_utils import CryptoUtils
@@ -325,6 +332,34 @@ class TestAPITransactions(unittest.TestCase):
         self.assertEqual(resp.status_code, 201, msg=resp.get_json())
         self.assertEqual(resp.get_json()['sender_address'], funded.address)
 
+    def test_create_signed_transaction_from_address(self):
+        """A UI manda so o endereco; o no assina com a chave do cofre."""
+        nova = self.client.post('/wallet/new', json={}).get_json()
+        self.assertNotIn('private_key_pem', nova)
+
+        # Minerar para o endereco novo da saldo a ele.
+        for _ in range(3):
+            self.client.post('/mine', json={'miner_address': nova['address']})
+
+        resp = self.client.post('/api/transactions/create-signed', json={
+            'from_address': nova['address'],
+            'receiver': self.wallet.address,
+            'amount': 5.0,
+            'fee': 0.001,
+        })
+        self.assertEqual(resp.status_code, 201, msg=resp.get_json())
+        self.assertEqual(resp.get_json()['sender_address'], nova['address'])
+
+    def test_create_signed_transaction_from_unknown_address_is_400(self):
+        """Endereco fora do cofre pede uma restauracao com as 24 palavras."""
+        resp = self.client.post('/api/transactions/create-signed', json={
+            'from_address': Wallet().address,
+            'receiver': self.wallet.address,
+            'amount': 1.0,
+        })
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.get_json().get('code'), 'SIGNER_NOT_FOUND')
+
     def test_create_signed_transaction_without_signer_is_400(self):
         """Sem chave privada e sem frase, nada é assinado."""
         resp = self.client.post('/api/transactions/create-signed', json={
@@ -401,15 +436,15 @@ class TestAPIWallet(unittest.TestCase):
         data = resp.get_json()
         self.assertIn('address', data)
         self.assertIn('public_key', data)
-        # A chave vai para o navegador que criou a carteira (ele assina as
-        # transacoes); sem ela a UI nao consegue enviar.
-        self.assertIn('private_key_pem', data)
+        # A chave privada NAO vai para o navegador: fica no cofre do no e
+        # quem assina o envio e o servidor.
+        self.assertNotIn('private_key_pem', data)
         self.assertIn('mnemonic', data)
         # Endereco deve ter tamanho razoavel
         self.assertGreater(len(data['address']), 20)
 
-    def test_new_wallet_private_key_pertence_a_frase(self):
-        """A chave devolvida e a mesma que a frase de recuperacao deriva."""
+    def test_new_wallet_guarda_a_chave_no_cofre_do_no(self):
+        """A chave fica no cofre do no: a frase deriva o mesmo endereco."""
         resp = self.client.post('/wallet/new', json={})
         self.assertEqual(resp.status_code, 200)
         data = resp.get_json()
@@ -417,7 +452,10 @@ class TestAPIWallet(unittest.TestCase):
             private_key_pem=private_key_pem_from_mnemonic(data['mnemonic'])
         )
         self.assertEqual(data['address'], esperada.address)
-        self.assertEqual(data['private_key_pem'], esperada.private_key_pem)
+        from core.wallet_vault import get_private_key
+        self.assertEqual(
+            get_private_key(data['address']), esperada.private_key_pem
+        )
 
     def test_get_balance(self):
         """GET /balance/<address> deve retornar saldo (sem historico por padrao)."""

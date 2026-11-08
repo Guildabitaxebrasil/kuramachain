@@ -1,5 +1,13 @@
 """Testes da frase de recuperação de carteira (BIP39, 24 palavras)."""
+import os
+import tempfile
 import unittest
+
+# Cofre das carteiras num diretório temporário (não escreve em data/).
+os.environ.setdefault(
+    'KURAMA_WALLETS_FILE',
+    os.path.join(tempfile.mkdtemp(prefix='kurama-vault-'), 'wallets.json'),
+)
 
 from api.routes import create_app
 from core.mnemonic import (
@@ -77,7 +85,8 @@ class TestWalletMnemonicAPI(unittest.TestCase):
         data = resp.get_json()
 
         self.assertEqual(data['address'], esperada.address)
-        self.assertEqual(data['private_key_pem'], esperada.private_key_pem)
+        # A chave não vai para o navegador; ela fica no cofre do nó.
+        self.assertNotIn('private_key_pem', data)
         self.assertTrue(data['restored'])
         self.assertEqual(data['mnemonic_words'], 24)
 
@@ -91,9 +100,9 @@ class TestWalletMnemonicAPI(unittest.TestCase):
         )
         self.assertEqual(resp.status_code, 200)
         data = resp.get_json()
-        # A frase recria a carteira: endereço e chave precisam bater.
+        # A frase recria a carteira: o endereço precisa bater.
         self.assertEqual(data['address'], esperada.address)
-        self.assertEqual(data['private_key_pem'], esperada.private_key_pem)
+        self.assertNotIn('private_key_pem', data)
 
     def test_restauracao_rejeita_frase_invalida(self):
         resp = self.client.post(
@@ -118,7 +127,7 @@ class TestWalletMnemonicAPI(unittest.TestCase):
 
         restaurada = Wallet(private_key_pem=private_key_pem_from_mnemonic(phrase))
         self.assertEqual(restaurada.address, data['address'])
-        self.assertEqual(restaurada.private_key_pem, data['private_key_pem'])
+        self.assertNotIn('private_key_pem', data)
 
 
 if __name__ == '__main__':

@@ -51,8 +51,8 @@ export const resolveConsensus = () => fetchData<{ message: string; chain_replace
 export const getNodes = () => fetchData<NodesResponse>('/api/nodes');
 export const syncNodes = () => postData<{ message: string; chain_replaced: boolean }>('/api/nodes/sync', {});
 
-// Signed transaction (dev helper: server-side signing)
-export const createSignedTransaction = (data: { private_key_pem?: string; mnemonic?: string; receiver: string; amount: number; fee?: number }) =>
+// Transação assinada no servidor: a UI manda só o endereço de origem.
+export const createSignedTransaction = (data: { from_address?: string; private_key_pem?: string; mnemonic?: string; receiver: string; amount: number; fee?: number }) =>
   postData<{
     message: string;
     transaction: Transaction;

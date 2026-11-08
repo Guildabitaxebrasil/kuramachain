@@ -77,7 +77,7 @@ export default function ConnectWallet() {
       setError('Carteira não encontrada');
       return;
     }
-    connect(w.address, w.private_key_pem, w.public_key, w.label);
+    connect(w.address, w.public_key, w.label);
     setShowModal(false);
     setView('menu');
   };
@@ -88,8 +88,8 @@ export default function ConnectWallet() {
       setError('Cole um endereço');
       return;
     }
-    // Conecta apenas com endereço (modo somente leitura - sem chave privada)
-    connect(addr, '', '');
+    // Conecta apenas com endereço (sem chave no navegador)
+    connect(addr);
     setShowModal(false);
     setView('menu');
   };

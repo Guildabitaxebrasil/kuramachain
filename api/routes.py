@@ -50,6 +50,10 @@ from core.mnemonic import (
 )
 from core.transaction import Transaction
 from core.wallet import Wallet
+from core.wallet_vault import (
+    get_private_key as vault_get_private_key,
+    save_wallet as vault_save_wallet,
+)
 from core.blockchain import Blockchain
 import os
 from config import (
@@ -1181,10 +1185,9 @@ Documentação completa dos endpoints e schemas.
         (Web Crypto), para nunca trafegar pela rede.
 
         SEGURANÇA (chave privada):
-        - A chave privada é devolvida nesta resposta para o navegador que
-          criou a carteira, que a guarda e assina as transações localmente.
-        - Ela não fica guardada no servidor nem é devolvida em consultas
-          posteriores: para outra máquina, só restaurando com as 24 palavras.
+        - A chave privada NÃO é devolvida: ela fica no cofre do nó
+          (WALLETS_FILE) e o navegador guarda apenas o endereço.
+        - O envio pela UI manda só `from_address`; quem assina é o servidor.
         - A frase de recuperação continua sendo exibida uma única vez:
           sem ela a carteira não pode ser restaurada.
         """
@@ -1194,18 +1197,19 @@ Documentação completa dos endpoints e schemas.
         # NUNCA logar a frase de recuperação nem a chave privada (A-03)
 
         # ─── Retorna dados públicos da carteira ─────────────────
-        # A chave privada NUNCA deve ser transmitida pela rede (C-01).
-        # Em produção, a assinatura é feita exclusivamente no cliente.
+        # A chave privada NUNCA vai para o navegador (C-01): fica no cofre
+        # do nó e só o servidor assina os envios desta carteira.
         data = wallet.export_public()
         # Frase de recuperação: exibida uma única vez pelo frontend e nunca
         # persistida. Sem ela não há como recuperar esta carteira.
         data['mnemonic'] = mnemonic
         data['mnemonic_words'] = len(mnemonic.split())
 
-        data['private_key_pem'] = wallet.private_key_pem
+        vault_save_wallet(wallet.address, wallet.private_key_pem,
+                          wallet.public_key_pem)
         data['warning'] = (
             'Guarde sua frase de recuperação com segurança! '
-            'A chave privada fica salva apenas neste navegador.'
+            'A chave privada fica no nó; este navegador guarda só o endereço.'
         )
         
         return jsonify(data), 200
@@ -1245,9 +1249,11 @@ Documentação completa dos endpoints e schemas.
         data['mnemonic_words'] = len(mnemonic.split())
         data['restored'] = True
 
-        # Mesma política de /wallet/new: a chave volta apenas para quem provou
-        # ter as 24 palavras desta carteira.
-        data['private_key_pem'] = wallet.private_key_pem
+        # Mesma política de /wallet/new: a chave fica no cofre do nó e o
+        # navegador recebe apenas o endereço. Restaurar também readmite uma
+        # carteira criada em outra máquina — depois disso o nó assina por ela.
+        vault_save_wallet(wallet.address, wallet.private_key_pem,
+                          wallet.public_key_pem)
 
         return jsonify(data), 200
 
@@ -2039,24 +2045,21 @@ Documentação completa dos endpoints e schemas.
     @rate_limit
     def create_signed_transaction():
         """
-        Cria uma transação ASSINADA a partir de uma chave privada.
+        Cria uma transação ASSINADA no servidor.
 
-        Este endpoint é usado pelo frontend para criar transações
-        sem necessidade de bibliotecas criptográficas no navegador.
-        A chave privada é enviada por HTTPS (dev) e usada apenas
-        para assinar — NUNCA é armazenada no servidor.
-
-        ATENÇÃO (Dev only):
-        - Em produção, a assinatura DEVE ser feita no cliente.
-        - A chave privada NUNCA deve trafegar pela rede em produção.
+        A interface manda só o endereço de origem: a chave privada fica no
+        cofre do nó (core/wallet_vault.py) e nunca é enviada ao navegador.
 
         Body (JSON):
         {
-            "private_key_pem": "<chave privada PEM>",
+            "from_address": "<endereço de origem>",
             "receiver": "<endereço do destinatário>",
             "amount": 10.0,
             "fee": 0.001              # Opcional (default: 0.001)
         }
+
+        Para scripts/testes continuam aceitos `private_key_pem` (PEM direto)
+        ou `mnemonic` (24 palavras), que têm precedência sobre o cofre.
 
         Returns:
             Dados da transação criada ou erro
@@ -2072,14 +2075,24 @@ Documentação completa dos endpoints e schemas.
                 'missing': missing
             }), 400
 
-        # ─── Chave de assinatura: PEM direto ou frase de recuperação ───
-        # A frase é derivada (BIP39/BIP32) apenas para assinar esta
-        # transação e nunca é devolvida, gravada ou logada — mesma
-        # política de /wallet/restore. Isso permite enviar de uma carteira
-        # criada num nó que não expõe a chave privada (o caso padrão em
-        # produção), onde o navegador só tem as 24 palavras.
+        # ─── Quem assina: endereço no cofre, PEM direto ou a frase ───
+        # O caminho da UI é `from_address`: a chave está no cofre do nó e o
+        # navegador nunca a vê. A frase (BIP39/BIP32) é derivada só para
+        # assinar esta transação e não é gravada nem logada.
+        from_address = str(data.get('from_address') or '').strip()
         private_key_pem = data.get('private_key_pem')
         mnemonic = ' '.join(str(data.get('mnemonic', '')).split()).lower()
+
+        if from_address and not private_key_pem and not mnemonic:
+            private_key_pem = vault_get_private_key(from_address)
+            if not private_key_pem:
+                return jsonify({
+                    'error': 'Esta carteira não está guardada neste nó. '
+                             'Restaure-a uma única vez com as 24 palavras '
+                             'para poder enviar.',
+                    'code': 'SIGNER_NOT_FOUND',
+                }), 400
+
         if not private_key_pem:
             if not mnemonic:
                 return jsonify({

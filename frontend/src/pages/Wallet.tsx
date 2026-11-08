@@ -79,16 +79,16 @@ export default function Wallet() {
       const wallet = await newWallet();
       setAddress(wallet.address);
       // Salva no localStorage para usar no SendTransaction
-      // (a frase de recuperação não é salva em lugar nenhum)
+      // (nem a frase nem a chave privada ficam no navegador; a chave fica
+      // no cofre do nó, que assina os envios por este endereço)
       saveWallet({
         address: wallet.address,
         public_key: wallet.public_key_pem || '',
-        private_key_pem: wallet.private_key_pem || '',
         label: `Carteira #${Date.now() % 10000}`,
         created_at: Date.now(),
       });
       // Conecta automaticamente
-      connect(wallet.address, wallet.private_key_pem, wallet.public_key_pem);
+      connect(wallet.address, wallet.public_key_pem);
       setQueryAddress(wallet.address);
       fetchWalletData(wallet.address);
       // Mostra a frase uma única vez; ao fechar ela é descartada

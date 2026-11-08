@@ -128,6 +128,11 @@ DATA_DIR = _path('DATA_DIR', 'data')
 CHAIN_FILE = _path('CHAIN_FILE', os.path.join('data', 'blockchain.json'))
 WALLET_FILE = _path('WALLET_FILE', os.path.join('data', 'wallet.json'))
 
+# Cofre das carteiras criadas/restauradas pela interface. A chave privada
+# NÃO fica no navegador: fica aqui (0600, escrita atômica) e é usada só pelo
+# servidor na hora de assinar um envio. Nunca versionar nem servir por HTTP.
+WALLETS_FILE = _path('KURAMA_WALLETS_FILE', os.path.join('data', 'wallets.json'))
+
 # Identidade fixa do nó: frase de 24 palavras (BIP39) que deriva a carteira
 # mineradora. Necessária onde o disco é efêmero (Render free): WALLET_FILE
 # desaparece a cada deploy, mas a variável de ambiente não. Vazio = usa o

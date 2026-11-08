@@ -2,27 +2,52 @@
  * Utilitário para armazenar carteiras no localStorage.
  * As carteiras ficam disponíveis entre sessões (persistência local).
  *
- * ATENÇÃO: A chave privada é armazenada no navegador!
- * Isso é aceitável para ambiente de desenvolvimento/educacional.
- * Em produção, a chave privada NUNCA deve ser armazenada no navegador
- * sem criptografia adequada (ex: usar Web Crypto API + senha).
+ * SEGURANÇA: aqui fica apenas o endereço (e a chave pública). A chave privada
+ * nunca é gravada no navegador — ela fica no cofre do nó e quem assina as
+ * transações é o servidor. Versões antigas gravavam a PEM neste storage; ela
+ * é removida na primeira leitura (ver `getStoredWallets`).
  */
 
 export interface StoredWallet {
   address: string;
   public_key: string;
-  private_key_pem: string;
   label: string;
   created_at: number;
 }
 
 const STORAGE_KEY = 'kurama_wallets';
 
+/**
+ * Remove chaves privadas que versões anteriores deixaram no navegador e
+ * regrava o storage limpo. Devolve a lista já sem as chaves.
+ */
+function stripLegacyPrivateKeys(wallets: any[]): StoredWallet[] {
+  let changed = false;
+  const clean = wallets.map(w => {
+    if (w && typeof w === 'object' && 'private_key_pem' in w) {
+      changed = true;
+      const { private_key_pem, ...rest } = w as Record<string, unknown>;
+      return rest as unknown as StoredWallet;
+    }
+    return w as StoredWallet;
+  });
+  if (changed) {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(clean));
+    } catch {
+      /* storage cheio/indisponível: a lista em memória já está limpa */
+    }
+  }
+  return clean;
+}
+
 export function getStoredWallets(): StoredWallet[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return [];
-    return JSON.parse(raw) as StoredWallet[];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return stripLegacyPrivateKeys(parsed);
   } catch {
     return [];
   }
@@ -33,21 +58,11 @@ export function saveWallet(wallet: StoredWallet): void {
   const index = wallets.findIndex(w => w.address === wallet.address);
 
   if (index >= 0) {
-    // Carteira já salva: aproveita para gravar a chave privada agora que ela
-    // chegou. Sem isso, quem restaurou uma carteira salva antes (sem chave)
-    // continuava sem conseguir enviar, porque o registro antigo era mantido.
-    if (wallet.private_key_pem) {
-      wallets[index] = {
-        ...wallets[index],
-        public_key: wallet.public_key || wallets[index].public_key,
-        private_key_pem: wallet.private_key_pem,
-      };
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(wallets));
-    }
-    return;
+    wallets[index] = { ...wallets[index], ...wallet };
+  } else {
+    wallets.push(wallet);
   }
 
-  wallets.push(wallet);
   localStorage.setItem(STORAGE_KEY, JSON.stringify(wallets));
 }
 

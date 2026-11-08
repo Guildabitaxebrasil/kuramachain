@@ -70,7 +70,8 @@ export default function RestoreWalletForm({ onRestored, onCancel }: Props) {
       <p className="text-xs text-kur-text-muted leading-relaxed">
         🔒 A frase é usada só para recriar as chaves: não fica salva neste navegador
         nem no servidor, e é apagada desta tela ao concluir. Depois de restaurar,
-        a chave privada fica guardada apenas neste navegador para assinar envios.
+        a chave privada fica no cofre do nó (nunca neste navegador) e é ele quem
+        assina os envios desta carteira — aqui fica só o endereço.
       </p>
 
       {error && (

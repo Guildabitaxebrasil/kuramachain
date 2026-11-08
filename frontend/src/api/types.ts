@@ -28,7 +28,6 @@ export interface Transaction {
 export interface WalletInfo {
   address: string;
   public_key_pem: string;
-  private_key_pem: string;
   /**
    * Frase de recuperação BIP39 (24 palavras), devolvida uma única vez pela API.
    * Exibir apenas em memória — nunca gravar em localStorage ou qualquer storage.

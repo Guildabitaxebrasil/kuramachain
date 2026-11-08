@@ -2,9 +2,9 @@ import React, { createContext, useContext, useState, useEffect, useCallback, typ
 import { newWallet, restoreWallet } from '../api/client';
 import { getStoredWallets, saveWallet as persistWallet, removeWallet as removeStoredWallet, type StoredWallet } from '../utils/walletStorage';
 
+/** Carteira conectada: só dados públicos — a chave privada fica no nó. */
 interface ConnectedWallet {
   address: string;
-  private_key_pem: string;
   public_key: string;
   label: string;
 }
@@ -14,8 +14,8 @@ interface WalletContextType {
   wallet: ConnectedWallet | null;
   /** Lista de carteiras salvas no localStorage */
   savedWallets: StoredWallet[];
-  /** Conecta a uma carteira existente */
-  connect: (address: string, privateKeyPem: string, publicKey: string, label?: string) => void;
+  /** Conecta a uma carteira existente (endereço + chave pública) */
+  connect: (address: string, publicKey?: string, label?: string) => void;
   /**
    * Cria e conecta uma nova carteira via API.
    * Retorna a frase de recuperação (24 palavras), que existe só em memória:
@@ -42,11 +42,21 @@ const WalletContext = createContext<WalletContextType | null>(null);
 
 const STORAGE_KEY = 'kurama_connected_wallet';
 
+/**
+ * Lê a carteira conectada. Versões antigas gravavam a chave privada junto;
+ * ela é removida na hora, para não ficar no navegador.
+ */
 function loadConnectedWallet(): ConnectedWallet | null {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
-    return JSON.parse(raw) as ConnectedWallet;
+    const parsed = JSON.parse(raw) as ConnectedWallet & { private_key_pem?: string };
+    if (parsed && 'private_key_pem' in parsed) {
+      const { private_key_pem, ...rest } = parsed;
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(rest));
+      return rest;
+    }
+    return parsed;
   } catch {
     return null;
   }
@@ -73,10 +83,9 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     setSavedWallets(getStoredWallets());
   }, []);
 
-  const connect = useCallback((address: string, privateKeyPem: string, publicKey: string, label?: string) => {
+  const connect = useCallback((address: string, publicKey = '', label?: string) => {
     const connected: ConnectedWallet = {
       address,
-      private_key_pem: privateKeyPem,
       public_key: publicKey,
       label: label || `Carteira ${address.slice(0, 8)}...`,
     };
@@ -102,15 +111,14 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     try {
       const w = await newWallet();
       const label = `Carteira ${w.address.slice(0, 8)}...`;
-      // Salva no localStorage (sem a frase de recuperação: ela nunca é persistida)
+      // Só o endereço é persistido: a chave privada fica no cofre do nó.
       persistWallet({
         address: w.address,
         public_key: w.public_key_pem || '',
-        private_key_pem: w.private_key_pem || '',
         label,
         created_at: Date.now(),
       });
-      connect(w.address, w.private_key_pem, w.public_key_pem, label);
+      connect(w.address, w.public_key_pem, label);
       return w.mnemonic ?? null;
     } catch (err: any) {
       throw new Error(err?.response?.data?.error || err.message || 'Erro ao criar carteira');
@@ -124,11 +132,10 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       persistWallet({
         address: w.address,
         public_key: w.public_key_pem || '',
-        private_key_pem: w.private_key_pem || '',
         label,
         created_at: Date.now(),
       });
-      connect(w.address, w.private_key_pem, w.public_key_pem, label);
+      connect(w.address, w.public_key_pem, label);
       return w.address;
     } catch (err: any) {
       throw new Error(err?.response?.data?.error || err.message || 'Erro ao restaurar carteira');
