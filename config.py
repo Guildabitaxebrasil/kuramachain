@@ -111,9 +111,22 @@ NODE_TIMEOUT = _env('NODE_TIMEOUT', 2.0)
 TRUST_PROXY_HEADERS = _env('TRUST_PROXY_HEADERS', False)
 
 # ─── Dados / Persistência ────────────────────────────────────────
-DATA_DIR = _env('DATA_DIR', 'data')
-CHAIN_FILE = _env('CHAIN_FILE', 'data/blockchain.json')
-WALLET_FILE = _env('WALLET_FILE', 'data/wallet.json')
+# Caminhos são resolvidos a partir da raiz do projeto, não do diretório
+# atual: subir o nó de outra pasta (atalho, serviço, outro terminal) criava
+# um `data/` novo ali e a cadeia salva no projeto nunca era lida — o nó
+# nascia do gênese e ainda gravava por cima do arquivo em uso.
+PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
+
+
+def _path(key: str, default: str) -> str:
+    """Caminho de persistência absoluto (relativo à raiz do projeto)."""
+    value = os.environ.get(key) or default
+    return value if os.path.isabs(value) else os.path.join(PROJECT_ROOT, value)
+
+
+DATA_DIR = _path('DATA_DIR', 'data')
+CHAIN_FILE = _path('CHAIN_FILE', os.path.join('data', 'blockchain.json'))
+WALLET_FILE = _path('WALLET_FILE', os.path.join('data', 'wallet.json'))
 
 # Identidade fixa do nó: frase de 24 palavras (BIP39) que deriva a carteira
 # mineradora. Necessária onde o disco é efêmero (Render free): WALLET_FILE

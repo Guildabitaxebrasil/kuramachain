@@ -85,9 +85,10 @@ python run.py --load
 
 O nó atende em `https://localhost:5000` com certificado auto-assinado, então o
 navegador avisa na primeira visita — é esperado em desenvolvimento (use
-`--no-ssl` para HTTP puro). `--load` continua a cadeia de
-`data/blockchain.json` com a dificuldade salva; sem ele, o nó começa uma
-cadeia nova.
+`--no-ssl` para HTTP puro). A cadeia de `data/blockchain.json` é carregada
+automaticamente, junto com a dificuldade salva (`--load` continua aceito por
+compatibilidade). Para começar do gênesis de propósito use `--fresh`: a
+cadeia anterior fica guardada como `blockchain.json.bak-<data>`.
 
 ### 3. Minere — Terminal 2
 

@@ -17,6 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from api.routes import create_app
 from core.blockchain import Blockchain
 from core.wallet import Wallet
+from config import CHAIN_FILE
 
 def main():
     parser = argparse.ArgumentParser(description='Dev server')
@@ -27,10 +28,24 @@ def main():
     print("SERVIDOR DE DESENVOLVIMENTO")
     print(f"{'='*60}\n")
 
-    # Cria blockchain e wallet
-    blockchain = Blockchain(difficulty=4)
-    wallet = Wallet()
+    # Mesma persistência do run.py: carrega a cadeia salva e grava a cada
+    # bloco. Antes este servidor nascia sempre do gênesis e só salvava no
+    # Ctrl+C, em outro arquivo (data/chain_backup.json) — minerar por aqui
+    # e reiniciar perdia tudo.
+    if os.path.exists(CHAIN_FILE):
+        blockchain = Blockchain.load_from_file(CHAIN_FILE)
+    else:
+        blockchain = Blockchain(difficulty=4)
+    wallet = Wallet.load_or_create()
     miner_address = wallet.address
+
+    def _autosave_block(block):
+        try:
+            blockchain.save_to_file(CHAIN_FILE)
+        except Exception as exc:
+            print(f"[WARN] Falha ao salvar blockchain no bloco #{block.index}: {exc}")
+
+    blockchain.on('on_block_mined', _autosave_block)
 
     # Cria o app Flask
     app = create_app(
@@ -94,7 +109,7 @@ def main():
         app.run(host='0.0.0.0', port=args.port, debug=False, use_reloader=False)
     except KeyboardInterrupt:
         print("\n\n[BYE] Encerrando...")
-        blockchain.save_to_file('data/chain_backup.json')
+        blockchain.save_to_file(CHAIN_FILE)
 
 if __name__ == '__main__':
     main()

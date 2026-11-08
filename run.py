@@ -133,10 +133,14 @@ Exemplos:
                         help=f'Porta do servidor (default: {DEFAULT_PORT})')
     parser.add_argument('--difficulty', type=float, default=None,
                         help='Dificuldade do PoW — aceita fração (ex.: 6.15). '
-                             f'Com --load, o padrão é manter a salva; sem '
-                             f'--load, {DEFAULT_DIFFICULTY}')
+                             f'O padrão é manter a salva no arquivo; sem '
+                             f'cadeia salva, {DEFAULT_DIFFICULTY}')
     parser.add_argument('--load', action='store_true',
-                        help='Carregar blockchain salva')
+                        help='Carregar a blockchain salva (já é o padrão; '
+                             'mantido por compatibilidade)')
+    parser.add_argument('--fresh', action='store_true',
+                        help='Ignorar a cadeia salva e começar do gênesis. '
+                             'O arquivo anterior é preservado como .bak-<data>')
 
     # Segurança
     parser.add_argument('--no-ssl', action='store_true',
@@ -168,19 +172,39 @@ def run_single_node(args):
     print("BLOCKCHAIN NODE")
     print(f"{'='*60}\n")
 
-    # Carrega ou cria blockchain
-    if args.load and os.path.exists(CHAIN_FILE):
-        print("[DIR] Carregando blockchain do arquivo...")
-        blockchain = Blockchain.load_from_file(CHAIN_FILE)
-        # A dificuldade salva é a que o retarget calculou; sobrescrevê-la
-        # com o default a cada restart jogaria os blocos de volta para
-        # segundos. Só muda se o usuário passar --difficulty.
-        if args.difficulty is not None:
-            blockchain.difficulty = args.difficulty
+    # Carrega ou cria blockchain.
+    # A cadeia em CHAIN_FILE é a fonte da verdade: subir o nó sem flag
+    # nenhuma tem que continuar de onde parou. Antes só carregava com
+    # --load; sem ele o nó nascia do gênesis e o autosave gravava por
+    # cima do arquivo, apagando blocos e saldos a cada restart.
+    difficulty = (args.difficulty if args.difficulty is not None
+                  else DEFAULT_DIFFICULTY)
+    if args.fresh:
+        if os.path.exists(CHAIN_FILE):
+            backup = f"{CHAIN_FILE}.bak-{time.strftime('%Y%m%d-%H%M%S')}"
+            os.replace(CHAIN_FILE, backup)
+            print(f"[FRESH] Cadeia anterior preservada em {backup}")
+        print("[NEW] Criando nova blockchain...")
+        blockchain = Blockchain(difficulty=difficulty)
+    elif os.path.exists(CHAIN_FILE):
+        print(f"[LOAD] Carregando blockchain de {CHAIN_FILE}...")
+        try:
+            blockchain = Blockchain.load_from_file(CHAIN_FILE)
+        except Exception as exc:
+            # Não sobrescreve o arquivo ilegível: guarda uma cópia.
+            backup = f"{CHAIN_FILE}.corrupt-{time.strftime('%Y%m%d-%H%M%S')}"
+            os.replace(CHAIN_FILE, backup)
+            print(f"[WARN] Falha ao carregar a cadeia ({exc}). Arquivo "
+                  f"preservado em {backup}; começando do gênesis.")
+            blockchain = Blockchain(difficulty=difficulty)
+        else:
+            # A dificuldade salva é a que o retarget calculou; sobrescrevê-la
+            # com o default a cada restart jogaria os blocos de volta para
+            # segundos. Só muda se o usuário passar --difficulty.
+            if args.difficulty is not None:
+                blockchain.difficulty = args.difficulty
     else:
         print("[NEW] Criando nova blockchain...")
-        difficulty = (args.difficulty if args.difficulty is not None
-                      else DEFAULT_DIFFICULTY)
         blockchain = Blockchain(difficulty=difficulty)
 
     # ─── Identidade do Nó (ECDSA Persistente) ───────────────────
