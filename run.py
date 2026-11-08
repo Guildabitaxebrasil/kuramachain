@@ -24,11 +24,6 @@ import sys
 import os
 import argparse
 import time
-
-# A UI assina as transações no navegador, mas a chave só chega lá se o
-# servidor devolvê-la em /wallet/new e /wallet/restore (opt-in do projeto).
-# Sem isso toda carteira salva no navegador fica sem chave e o envio falha.
-os.environ.setdefault('KURAMA_DEV_EXPOSE_KEYS', 'true')
 import json
 import subprocess
 import uuid

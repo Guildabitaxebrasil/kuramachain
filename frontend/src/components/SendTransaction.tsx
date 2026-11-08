@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { createSignedTransaction } from '../api/client';
 import { getStoredWallets, type StoredWallet } from '../utils/walletStorage';
 import { useWallet } from '../context/WalletContext';
+import RestoreWalletForm from './RestoreWalletForm';
 
 interface Props {
   isOpen: boolean;
@@ -20,6 +21,8 @@ export default function SendTransaction({ isOpen, onClose, onSuccess, onError }:
   const [sending, setSending] = useState(false);
   const [customPk, setCustomPk] = useState('');
   const [mode, setMode] = useState<'wallets' | 'pem'>('wallets');
+  /* Restauração da própria carteira sem chave, aqui mesmo no modal. */
+  const [restoring, setRestoring] = useState(false);
   /* Etapa do modal: preenche os dados e só envia depois de conferir e
      confirmar o endereço de destino. */
   const [step, setStep] = useState<'form' | 'confirm'>('form');
@@ -36,6 +39,7 @@ export default function SendTransaction({ isOpen, onClose, onSuccess, onError }:
       setCustomPk('');
       setStep('form');
       setSending(false);
+      setRestoring(false);
       const canSign = stored.filter(w => w.private_key_pem);
       setMode(canSign.length > 0 ? 'wallets' : 'pem');
       // Carteira conectada já vem escolhida como origem.
@@ -56,6 +60,17 @@ export default function SendTransaction({ isOpen, onClose, onSuccess, onError }:
     if (e.target === overlayRef.current) onClose();
   };
 
+  /**
+   * Depois de restaurar, recarrega as carteiras salvas e já escolhe a
+   * restaurada como origem: a chave acabou de ser gravada no navegador.
+   */
+  const handleRestored = (address: string) => {
+    const stored = getStoredWallets();
+    setWallets(stored);
+    if (stored.some(w => w.address === address)) setSelectedWallet(address);
+    setRestoring(false);
+  };
+
   /** Valida o formulário e avança para a confirmação. */
   const handleReview = () => {
     if (mode === 'pem') {
@@ -71,7 +86,7 @@ export default function SendTransaction({ isOpen, onClose, onSuccess, onError }:
       if (!selected.private_key_pem) {
         onError(
           'Esta carteira foi salva sem a chave privada. ' +
-          'Restaure-a uma única vez com a frase de recuperação em "Conectar": ' +
+          'Use "Restaurar esta carteira" com as 24 palavras uma única vez: ' +
           'a chave fica salva aqui e os próximos envios não pedem mais as palavras.'
         );
         return;
@@ -231,11 +246,28 @@ export default function SendTransaction({ isOpen, onClose, onSuccess, onError }:
                     </p>
                   )}
                   {selected && !selected.private_key_pem && (
-                    <p className="mt-1.5 text-xs text-kur-yellow">
-                      Esta carteira foi salva sem a chave privada. Restaure-a uma única vez
-                      com a frase de recuperação em "Conectar": a chave passa a ficar
-                      salva neste navegador e o envio não pede mais as palavras.
-                    </p>
+                    <div className="mt-2 rounded-lg border border-kur-yellow/30 bg-kur-yellow/5 p-3">
+                      <p className="text-xs text-kur-yellow">
+                        Esta carteira foi salva sem a chave privada. Restaure-a uma única
+                        vez com as 24 palavras: a chave fica salva neste navegador e os
+                        próximos envios não pedem mais as palavras.
+                      </p>
+                      {restoring ? (
+                        <div className="mt-3">
+                          <RestoreWalletForm
+                            onRestored={handleRestored}
+                            onCancel={() => setRestoring(false)}
+                          />
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => setRestoring(true)}
+                          className="mt-2 px-3 py-1.5 text-xs font-semibold rounded-lg bg-kur-gradient text-white hover:brightness-110 transition-all"
+                        >
+                          Restaurar esta carteira
+                        </button>
+                      )}
+                    </div>
                   )}
                 </div>
               ) : (

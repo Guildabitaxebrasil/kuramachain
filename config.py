@@ -193,13 +193,6 @@ WALLET_ENCRYPTION_SALT_BYTES = 32       # Salt size for PBKDF2
 P2P_HMAC_AUTH = True                     # Usar HMAC-SHA256 em vez de secret puro
 P2P_ENCRYPTION = True                    # Criptografar payloads P2P com AES-256-GCM
 
-# Expor a chave privada em /wallet/new e /wallet/restore (APENAS dev).
-# O servidor devolve a chave só para a carteira recém-criada/restaurada, e o
-# navegador a guarda para assinar as transações — sem ela o envio pela UI é
-# impossível. run.py, start_dev.py e o deploy do Render ligam a variável;
-# em KURAMA_PRODUCTION ela é ignorada.
-DEV_EXPOSE_KEYS = _env('KURAMA_DEV_EXPOSE_KEYS', False)
-
 # Consenso / Finality
 REORG_LIMIT = 100                        # Profundidade máxima de reorganização (0 = ilimitado)
 # Headers para assinatura criptográfica de mensagens P2P.

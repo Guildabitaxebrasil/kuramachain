@@ -10,7 +10,6 @@ from core.mnemonic import (
     seed_to_private_key,
 )
 from core.wallet import Wallet
-import os
 
 
 class TestMnemonic(unittest.TestCase):
@@ -66,16 +65,7 @@ class TestWalletMnemonicAPI(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        # /wallet/new e /wallet/restore só devolvem a chave privada com
-        # opt-in explícito (KURAMA_DEV_EXPOSE_KEYS=true) e fora de produção.
-        os.environ['KURAMA_DEV_EXPOSE_KEYS'] = 'true'
-        os.environ.pop('KURAMA_PRODUCTION', None)
-        # re-importa o módulo para que DEV_EXPOSE_KEYS seja recarregado
-        import importlib, api.routes as _routes, config as _cfg
-        importlib.reload(_cfg)
-        importlib.reload(_routes)
-        from api.routes import create_app as _ca
-        cls.app = _ca(port=5000)
+        cls.app = create_app(port=5000)
         cls.client = cls.app.test_client()
 
     def test_restaura_carteira_com_a_frase(self):
@@ -101,11 +91,9 @@ class TestWalletMnemonicAPI(unittest.TestCase):
         )
         self.assertEqual(resp.status_code, 200)
         data = resp.get_json()
-        # Só expõe a chave com o opt-in explícito; a frase ainda recria a
-        # carteira, portanto o endereço bate.
+        # A frase recria a carteira: endereço e chave precisam bater.
         self.assertEqual(data['address'], esperada.address)
-        if 'private_key_pem' in data:
-            self.assertEqual(data['private_key_pem'], esperada.private_key_pem)
+        self.assertEqual(data['private_key_pem'], esperada.private_key_pem)
 
     def test_restauracao_rejeita_frase_invalida(self):
         resp = self.client.post(
@@ -131,12 +119,6 @@ class TestWalletMnemonicAPI(unittest.TestCase):
         restaurada = Wallet(private_key_pem=private_key_pem_from_mnemonic(phrase))
         self.assertEqual(restaurada.address, data['address'])
         self.assertEqual(restaurada.private_key_pem, data['private_key_pem'])
-
-
-    @classmethod
-    def tearDownClass(cls):
-        # Remove o opt-in para que a próxima execução volte ao padrão.
-        os.environ.pop('KURAMA_DEV_EXPOSE_KEYS', None)
 
 
 if __name__ == '__main__':

@@ -57,7 +57,7 @@ from config import (
     SSL_CERT_DIR, P2P_SIGNATURE_HEADER, P2P_PUBKEY_HEADER,
     P2P_REQUIRE_SIGNATURE, TARGET_BLOCK_TIME, TRUST_PROXY_HEADERS,
     P2P_TIMESTAMP_HEADER, P2P_NONCE_HEADER, P2P_MAX_CLOCK_DRIFT,
-    P2P_MAX_PEERS, P2P_ALLOWED_PORTS, DEV_EXPOSE_KEYS,
+    P2P_MAX_PEERS, P2P_ALLOWED_PORTS,
 )
 
 # ─── Suprime warnings SSL para certs auto-assinados (dev) ──────
@@ -69,9 +69,12 @@ def _is_production_mode() -> bool:
     return os.environ.get('KURAMA_PRODUCTION', '').lower() in ('1', 'true', 'yes')
 
 
-def _dev_keys_enabled() -> bool:
-    """Só devolve chave privada com opt-in explícito e fora de produção."""
-    return not _is_production_mode() and bool(DEV_EXPOSE_KEYS)
+# A chave privada é devolvida por /wallet/new e /wallet/restore, sempre:
+# o navegador assina as transações localmente e sem a chave toda carteira
+# salva fica inutilizável. A exposição é limitada a quem acabou de criar ou
+# provou ter as 24 palavras daquela carteira (uma resposta, sem estado) —
+# quem tem a frase poderia derivar a mesma chave fora do servidor.
+
 
 
 def _normalize_ip(value) -> str | None:
@@ -1178,10 +1181,10 @@ Documentação completa dos endpoints e schemas.
         (Web Crypto), para nunca trafegar pela rede.
 
         SEGURANÇA (chave privada):
-        - A chave privada só sai com KURAMA_DEV_EXPOSE_KEYS=true (run.py e
-          start_dev.py ligam por padrão; em produção é ignorada).
-        - Ela vai apenas para quem acabou de criar/restaurar a carteira, uma
-          única vez por resposta, e permite assinar no navegador.
+        - A chave privada é devolvida nesta resposta para o navegador que
+          criou a carteira, que a guarda e assina as transações localmente.
+        - Ela não fica guardada no servidor nem é devolvida em consultas
+          posteriores: para outra máquina, só restaurando com as 24 palavras.
         - A frase de recuperação continua sendo exibida uma única vez:
           sem ela a carteira não pode ser restaurada.
         """
@@ -1199,18 +1202,11 @@ Documentação completa dos endpoints e schemas.
         data['mnemonic'] = mnemonic
         data['mnemonic_words'] = len(mnemonic.split())
 
-        if _dev_keys_enabled():
-            # OPT-IN EXPLÍCITO (KURAMA_DEV_EXPOSE_KEYS=true) e fora de produção.
-            data['private_key_pem'] = wallet.private_key_pem
-            data['warning'] = (
-                'DEV MODE: chave privada exposta por opt-in explícito. '
-                'Nunca use isto em produção.'
-            )
-        else:
-            data['warning'] = (
-                'Guarde sua frase de recuperação com segurança! '
-                'Ela não pode ser recuperada.'
-            )
+        data['private_key_pem'] = wallet.private_key_pem
+        data['warning'] = (
+            'Guarde sua frase de recuperação com segurança! '
+            'A chave privada fica salva apenas neste navegador.'
+        )
         
         return jsonify(data), 200
 
@@ -1249,9 +1245,9 @@ Documentação completa dos endpoints e schemas.
         data['mnemonic_words'] = len(mnemonic.split())
         data['restored'] = True
 
-        if _dev_keys_enabled():
-            # Mesma política de /wallet/new: só com opt-in explícito.
-            data['private_key_pem'] = wallet.private_key_pem
+        # Mesma política de /wallet/new: a chave volta apenas para quem provou
+        # ter as 24 palavras desta carteira.
+        data['private_key_pem'] = wallet.private_key_pem
 
         return jsonify(data), 200
 

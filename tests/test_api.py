@@ -401,23 +401,23 @@ class TestAPIWallet(unittest.TestCase):
         data = resp.get_json()
         self.assertIn('address', data)
         self.assertIn('public_key', data)
-        # Por padrao a chave privada NAO trafega pela rede.
-        self.assertNotIn('private_key_pem', data)
+        # A chave vai para o navegador que criou a carteira (ele assina as
+        # transacoes); sem ela a UI nao consegue enviar.
+        self.assertIn('private_key_pem', data)
         self.assertIn('mnemonic', data)
         # Endereco deve ter tamanho razoavel
         self.assertGreater(len(data['address']), 20)
 
-    def test_new_wallet_private_key_requires_explicit_opt_in(self):
-        """KURAMA_DEV_EXPOSE_KEYS=true e o unico caminho para a chave."""
-        import api.routes as routes
-        previous = routes.DEV_EXPOSE_KEYS
-        routes.DEV_EXPOSE_KEYS = True
-        try:
-            resp = self.client.post('/wallet/new', json={})
-            self.assertEqual(resp.status_code, 200)
-            self.assertIn('private_key_pem', resp.get_json())
-        finally:
-            routes.DEV_EXPOSE_KEYS = previous
+    def test_new_wallet_private_key_pertence_a_frase(self):
+        """A chave devolvida e a mesma que a frase de recuperacao deriva."""
+        resp = self.client.post('/wallet/new', json={})
+        self.assertEqual(resp.status_code, 200)
+        data = resp.get_json()
+        esperada = Wallet(
+            private_key_pem=private_key_pem_from_mnemonic(data['mnemonic'])
+        )
+        self.assertEqual(data['address'], esperada.address)
+        self.assertEqual(data['private_key_pem'], esperada.private_key_pem)
 
     def test_get_balance(self):
         """GET /balance/<address> deve retornar saldo (sem historico por padrao)."""

@@ -24,14 +24,9 @@ services:
     envVars:
       # /wallet/new e /wallet/restore devolvem a chave privada da carteira
       # criada/restaurada para o próprio navegador que a pediu, que a guarda
-      # no localStorage para assinar as transações. Sem isso toda carteira
-      # salva ficava sem chave e o envio pela UI era impossível.
-      # Só a carteira recém-criada/restaurada recebe a chave, uma única vez
-      # por resposta: qualquer outra carteira exige a frase de 24 palavras.
+      # no localStorage para assinar as transações (sem variável de ambiente).
       - key: KURAMA_PRODUCTION
         value: "false"
-      - key: KURAMA_DEV_EXPOSE_KEYS
-        value: "true"
       - key: DATA_DIR
         value: data
       - key: CHAIN_FILE
