@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react';
-import { newWallet, restoreWallet } from '../api/client';
+import { newWallet, restoreWallet, setWalletPassword as setWalletPasswordApi } from '../api/client';
 import { getStoredWallets, saveWallet as persistWallet, removeWallet as removeStoredWallet, type StoredWallet } from '../utils/walletStorage';
 
 /** Carteira conectada: só dados públicos — a chave privada fica no nó. */
@@ -20,14 +20,21 @@ interface WalletContextType {
    * Cria e conecta uma nova carteira via API.
    * Retorna a frase de recuperação (24 palavras), que existe só em memória:
    * o chamador deve exibi-la uma vez e descartá-la.
+   * Com `password`, a chave é cifrada no cofre do nó e a senha passa a ser
+   * exigida em cada envio.
    */
-  createAndConnect: () => Promise<string | null>;
+  createAndConnect: (password?: string) => Promise<string | null>;
   /**
    * Recupera uma carteira a partir da frase de 24 palavras e conecta.
    * A frase não é armazenada em lugar nenhum.
    * Retorna o endereço restaurado.
    */
-  restoreAndConnect: (mnemonic: string) => Promise<string>;
+  restoreAndConnect: (mnemonic: string, password?: string) => Promise<string>;
+  /**
+   * Define (ou troca) a senha que protege o envio desta carteira no nó.
+   * Devolve a mensagem do servidor.
+   */
+  setWalletPassword: (address: string, password: string, currentPassword?: string) => Promise<string>;
   /** Desconecta a carteira atual */
   disconnect: () => void;
   /** Remove uma carteira salva */
@@ -107,9 +114,9 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     refreshSavedWallets();
   }, [wallet, disconnect, refreshSavedWallets]);
 
-  const createAndConnect = useCallback(async (): Promise<string | null> => {
+  const createAndConnect = useCallback(async (password?: string): Promise<string | null> => {
     try {
-      const w = await newWallet();
+      const w = await newWallet(password);
       const label = `Carteira ${w.address.slice(0, 8)}...`;
       // Só o endereço é persistido: a chave privada fica no cofre do nó.
       persistWallet({
@@ -117,6 +124,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
         public_key: w.public_key_pem || '',
         label,
         created_at: Date.now(),
+        has_password: !!w.has_password,
       });
       connect(w.address, w.public_key_pem, label);
       return w.mnemonic ?? null;
@@ -125,15 +133,16 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     }
   }, [connect]);
 
-  const restoreAndConnect = useCallback(async (mnemonic: string): Promise<string> => {
+  const restoreAndConnect = useCallback(async (mnemonic: string, password?: string): Promise<string> => {
     try {
-      const w = await restoreWallet(mnemonic);
+      const w = await restoreWallet(mnemonic, password);
       const label = `Carteira ${w.address.slice(0, 8)}...`;
       persistWallet({
         address: w.address,
         public_key: w.public_key_pem || '',
         label,
         created_at: Date.now(),
+        has_password: !!w.has_password,
       });
       connect(w.address, w.public_key_pem, label);
       return w.address;
@@ -141,6 +150,26 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       throw new Error(err?.response?.data?.error || err.message || 'Erro ao restaurar carteira');
     }
   }, [connect]);
+
+  const setWalletPassword = useCallback(async (
+    address: string, password: string, currentPassword?: string
+  ): Promise<string> => {
+    try {
+      const res = await setWalletPasswordApi({
+        address,
+        password,
+        current_password: currentPassword || undefined,
+      });
+      const stored = getStoredWallets().find(w => w.address === address);
+      if (stored) persistWallet({ ...stored, has_password: true });
+      refreshSavedWallets();
+      return res.message;
+    } catch (err: any) {
+      throw new Error(
+        err?.response?.data?.error || err.message || 'Erro ao definir a senha'
+      );
+    }
+  }, [refreshSavedWallets]);
 
   return (
     <WalletContext.Provider
@@ -150,6 +179,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
         connect,
         createAndConnect,
         restoreAndConnect,
+        setWalletPassword,
         disconnect,
         removeWallet,
         isConnected: !!wallet,

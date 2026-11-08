@@ -35,6 +35,17 @@ export interface WalletInfo {
   mnemonic?: string;
   /** Quantidade de palavras da frase (24). */
   mnemonic_words?: number;
+  /** A carteira do cofre pede senha para enviar. */
+  has_password?: boolean;
+}
+
+/** Estado de uma carteira no cofre do nó (sem revelar a chave privada). */
+export interface WalletVaultInfo {
+  address: string;
+  /** O nó tem a chave desta carteira e consegue assinar por ela. */
+  in_vault: boolean;
+  has_password: boolean;
+  public_key?: string;
 }
 
 export interface Stats {

@@ -53,6 +53,10 @@ from core.wallet import Wallet
 from core.wallet_vault import (
     get_private_key as vault_get_private_key,
     save_wallet as vault_save_wallet,
+    set_password as vault_set_password,
+    wallet_info as vault_wallet_info,
+    VaultError,
+    MIN_PASSWORD_LENGTH,
 )
 from core.blockchain import Blockchain
 import os
@@ -73,11 +77,30 @@ def _is_production_mode() -> bool:
     return os.environ.get('KURAMA_PRODUCTION', '').lower() in ('1', 'true', 'yes')
 
 
-# A chave privada é devolvida por /wallet/new e /wallet/restore, sempre:
-# o navegador assina as transações localmente e sem a chave toda carteira
-# salva fica inutilizável. A exposição é limitada a quem acabou de criar ou
-# provou ter as 24 palavras daquela carteira (uma resposta, sem estado) —
-# quem tem a frase poderia derivar a mesma chave fora do servidor.
+# A chave privada nunca vai para o navegador: /wallet/new e /wallet/restore
+# gravam no cofre do nó (core/wallet_vault.py) e a resposta leva só o
+# endereço. O envio manda `from_address` e, quando a carteira tem senha,
+# também a senha — sem ela o cofre não decifra nem assina.
+
+
+def _wallet_password(payload: dict) -> str:
+    """Lê a senha opcional do cofre e valida o formato.
+
+    Devolve '' quando o campo não veio (carteira sem senha). Levanta
+    ValueError com mensagem pronta para o usuário.
+    """
+    raw = (payload or {}).get('password')
+    if raw is None or raw == '':
+        return ''
+    if not isinstance(raw, str):
+        raise ValueError('Senha inválida.')
+    if len(raw) < MIN_PASSWORD_LENGTH:
+        raise ValueError(
+            f'A senha deve ter pelo menos {MIN_PASSWORD_LENGTH} caracteres.'
+        )
+    if len(raw) > 256:
+        raise ValueError('A senha é longa demais.')
+    return raw
 
 
 
@@ -1191,6 +1214,12 @@ Documentação completa dos endpoints e schemas.
         - A frase de recuperação continua sendo exibida uma única vez:
           sem ela a carteira não pode ser restaurada.
         """
+        body = request.get_json(silent=True) or {}
+        try:
+            password = _wallet_password(body)
+        except ValueError as e:
+            return jsonify({'error': str(e), 'code': 'INVALID_PASSWORD'}), 400
+
         mnemonic = generate_mnemonic()
         wallet = Wallet(private_key_pem=private_key_pem_from_mnemonic(mnemonic))
         print(f"[KEY] NOVA CARTEIRA CRIADA: {wallet.address}")
@@ -1206,10 +1235,13 @@ Documentação completa dos endpoints e schemas.
         data['mnemonic_words'] = len(mnemonic.split())
 
         vault_save_wallet(wallet.address, wallet.private_key_pem,
-                          wallet.public_key_pem)
+                          wallet.public_key_pem, password or None)
+        data['has_password'] = vault_wallet_info(wallet.address)['has_password']
         data['warning'] = (
             'Guarde sua frase de recuperação com segurança! '
             'A chave privada fica no nó; este navegador guarda só o endereço.'
+            + (' A carteira pede senha para enviar.' if data['has_password']
+               else ' Defina uma senha para que ninguém envie só com o endereço.')
         )
         
         return jsonify(data), 200
@@ -1229,6 +1261,10 @@ Documentação completa dos endpoints e schemas.
         """
         data_in = request.get_json(silent=True) or {}
         mnemonic = ' '.join(str(data_in.get('mnemonic', '')).split()).lower()
+        try:
+            password = _wallet_password(data_in)
+        except ValueError as e:
+            return jsonify({'error': str(e), 'code': 'INVALID_PASSWORD'}), 400
 
         if not mnemonic:
             return jsonify({'error': 'Informe a frase de recuperação.'}), 400
@@ -1252,10 +1288,64 @@ Documentação completa dos endpoints e schemas.
         # Mesma política de /wallet/new: a chave fica no cofre do nó e o
         # navegador recebe apenas o endereço. Restaurar também readmite uma
         # carteira criada em outra máquina — depois disso o nó assina por ela.
+        # Com senha, a chave é cifrada; sem senha, uma carteira que já estava
+        # protegida continua protegida (a frase não rebaixa a proteção).
         vault_save_wallet(wallet.address, wallet.private_key_pem,
-                          wallet.public_key_pem)
+                          wallet.public_key_pem, password or None)
+        data['has_password'] = vault_wallet_info(wallet.address)['has_password']
 
         return jsonify(data), 200
+
+    @app.route('/wallet/password', methods=['POST'])
+    @rate_limit
+    def set_wallet_password():
+        """
+        Define (ou troca) a senha que protege o envio de uma carteira do cofre.
+
+        A chave é decifrada e regravada cifrada com a senha nova (AES-256-GCM
+        + PBKDF2). Sem senha válida o cofre não assina a carteira.
+
+        Body JSON:
+            {
+              "address": "<endereço da carteira>",
+              "password": "<senha nova, mínimo 8 caracteres>",
+              "current_password": "<senha atual, se já houver>"
+            }
+        """
+        body = request.get_json(silent=True) or {}
+        address = str(body.get('address') or '').strip()
+        if not address:
+            return jsonify({'error': 'Informe o endereço da carteira.'}), 400
+        try:
+            password = _wallet_password(body)
+        except ValueError as e:
+            return jsonify({'error': str(e), 'code': 'INVALID_PASSWORD'}), 400
+        if not password:
+            return jsonify({
+                'error': 'Informe a senha nova.',
+                'code': 'INVALID_PASSWORD',
+            }), 400
+
+        current_password = body.get('current_password')
+        if current_password is not None and not isinstance(current_password, str):
+            return jsonify({'error': 'Senha atual inválida.'}), 400
+
+        try:
+            vault_set_password(address, password, current_password or '')
+        except VaultError as e:
+            return jsonify({'error': e.message, 'code': e.code}), 400
+
+        return jsonify({
+            'message': 'Senha definida: agora ela é exigida para enviar '
+                       'desta carteira.',
+            'address': address,
+            'has_password': True,
+        }), 200
+
+    @app.route('/wallet/info/<address>', methods=['GET'])
+    def wallet_vault_info(address: str):
+        """Informa se o nó consegue assinar por este endereço (sem revelar a chave)."""
+        return jsonify(vault_wallet_info(address)), 200
 
     @app.route('/balance/<address>', methods=['GET'])
     def get_balance(address: str):
@@ -2049,10 +2139,13 @@ Documentação completa dos endpoints e schemas.
 
         A interface manda só o endereço de origem: a chave privada fica no
         cofre do nó (core/wallet_vault.py) e nunca é enviada ao navegador.
+        Se a carteira tiver senha, ela vai no campo `password` e é usada só
+        para decifrar a chave neste envio (não é guardada).
 
         Body (JSON):
         {
             "from_address": "<endereço de origem>",
+            "password": "<senha da carteira, se houver>",
             "receiver": "<endereço do destinatário>",
             "amount": 10.0,
             "fee": 0.001              # Opcional (default: 0.001)
@@ -2084,14 +2177,12 @@ Documentação completa dos endpoints e schemas.
         mnemonic = ' '.join(str(data.get('mnemonic', '')).split()).lower()
 
         if from_address and not private_key_pem and not mnemonic:
-            private_key_pem = vault_get_private_key(from_address)
-            if not private_key_pem:
-                return jsonify({
-                    'error': 'Esta carteira não está guardada neste nó. '
-                             'Restaure-a uma única vez com as 24 palavras '
-                             'para poder enviar.',
-                    'code': 'SIGNER_NOT_FOUND',
-                }), 400
+            try:
+                private_key_pem = vault_get_private_key(
+                    from_address, data.get('password')
+                )
+            except VaultError as e:
+                return jsonify({'error': e.message, 'code': e.code}), 400
 
         if not private_key_pem:
             if not mnemonic:

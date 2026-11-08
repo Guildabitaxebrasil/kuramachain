@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import TransactionTable from '../components/TransactionTable';
-import { getBalance, newWallet, getAllTransactions } from '../api/client';
+import { getBalance, newWallet, getAllTransactions, getWalletVaultInfo } from '../api/client';
+import type { WalletVaultInfo } from '../api/types';
 import { saveWallet } from '../utils/walletStorage';
 import { getCachedBalance, setCachedBalance } from '../utils/balanceCache';
 import { useWallet } from '../context/WalletContext';
@@ -10,7 +11,7 @@ import RestoreWalletForm from '../components/RestoreWalletForm';
 import type { Transaction } from '../api/types';
 
 export default function Wallet() {
-  const { currentAddress, isConnected, connect } = useWallet();
+  const { currentAddress, isConnected, connect, setWalletPassword } = useWallet();
   const [address, setAddress] = useState('');
   const [queryAddress, setQueryAddress] = useState('');
   const [balance, setBalance] = useState<number | null>(null);
@@ -22,6 +23,14 @@ export default function Wallet() {
   // Nunca vai para localStorage, cookie, arquivo ou log.
   const [recoveryPhrase, setRecoveryPhrase] = useState<string | null>(null);
   const [showRestore, setShowRestore] = useState(false);
+  // Estado da carteira consultada no cofre do nó (tem chave? pede senha?).
+  const [vaultInfo, setVaultInfo] = useState<WalletVaultInfo | null>(null);
+  const [showPasswordForm, setShowPasswordForm] = useState(false);
+  const [newPassword, setNewPassword] = useState('');
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [passwordError, setPasswordError] = useState('');
+  const [passwordMsg, setPasswordMsg] = useState('');
+  const [savingPassword, setSavingPassword] = useState(false);
 
   // O clique numa carteira (busca do topo, "Ir para Carteira" do menu da
   // carteira conectada) chega como /wallet?address=0x...; sem ler esse
@@ -68,6 +77,41 @@ export default function Wallet() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [paramAddress, isConnected, currentAddress]);
 
+  // Consulta o cofre sempre que o endereço exibido muda.
+  useEffect(() => {
+    if (!queryAddress) {
+      setVaultInfo(null);
+      return;
+    }
+    let active = true;
+    getWalletVaultInfo(queryAddress)
+      .then(info => { if (active) setVaultInfo(info); })
+      .catch(() => { if (active) setVaultInfo(null); });
+    return () => { active = false; };
+  }, [queryAddress]);
+
+  const handleSetPassword = async () => {
+    if (!queryAddress || newPassword.length < 8) return;
+    setSavingPassword(true);
+    setPasswordError('');
+    setPasswordMsg('');
+    try {
+      const msg = await setWalletPassword(
+        queryAddress,
+        newPassword,
+        vaultInfo?.has_password ? currentPassword : undefined,
+      );
+      setPasswordMsg(msg);
+      setNewPassword('');
+      setCurrentPassword('');
+      setVaultInfo(await getWalletVaultInfo(queryAddress));
+    } catch (err: any) {
+      setPasswordError(err?.message || 'Erro ao definir a senha');
+    } finally {
+      setSavingPassword(false);
+    }
+  };
+
   const handleSearch = () => {
     if (!address.trim()) return;
     setQueryAddress(address.trim());
@@ -86,6 +130,7 @@ export default function Wallet() {
         public_key: wallet.public_key_pem || '',
         label: `Carteira #${Date.now() % 10000}`,
         created_at: Date.now(),
+        has_password: !!wallet.has_password,
       });
       // Conecta automaticamente
       connect(wallet.address, wallet.public_key_pem);
@@ -182,6 +227,71 @@ export default function Wallet() {
             </p>
             <p className="text-kur-text-muted text-xs font-mono mt-2 break-all">{queryAddress}</p>
           </div>
+
+          {vaultInfo?.in_vault && (
+            <div className="panel p-4 sm:p-5">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <div>
+                  <p className="text-sm font-medium text-kur-text">
+                    {vaultInfo.has_password
+                      ? '🔒 Envio protegido por senha'
+                      : '🔓 Envio sem senha'}
+                  </p>
+                  <p className="text-xs text-kur-text-muted mt-1 leading-relaxed">
+                    {vaultInfo.has_password
+                      ? 'O nó só assina um envio desta carteira depois que você digita a senha.'
+                      : 'A chave está no nó e qualquer pessoa que saiba este endereço pode enviar pela API. Defina uma senha para exigir confirmação.'}
+                  </p>
+                </div>
+                <button
+                  onClick={() => {
+                    setShowPasswordForm(v => !v);
+                    setPasswordError('');
+                    setPasswordMsg('');
+                  }}
+                  className="btn-outline whitespace-nowrap"
+                >
+                  {vaultInfo.has_password ? 'Trocar senha' : 'Definir senha'}
+                </button>
+              </div>
+
+              {showPasswordForm && (
+                <div className="mt-4 space-y-3 max-w-sm">
+                  {vaultInfo.has_password && (
+                    <input
+                      type="password"
+                      value={currentPassword}
+                      onChange={e => { setCurrentPassword(e.target.value); setPasswordError(''); }}
+                      placeholder="Senha atual"
+                      autoComplete="current-password"
+                      className="w-full bg-kur-bg border border-kur-border rounded-lg px-3 py-2.5 text-sm text-kur-text placeholder-kur-text-muted focus:outline-none focus:border-kur-accent"
+                    />
+                  )}
+                  <input
+                    type="password"
+                    value={newPassword}
+                    onChange={e => { setNewPassword(e.target.value); setPasswordError(''); }}
+                    placeholder="Nova senha (mínimo 8 caracteres)"
+                    autoComplete="new-password"
+                    className="w-full bg-kur-bg border border-kur-border rounded-lg px-3 py-2.5 text-sm text-kur-text placeholder-kur-text-muted focus:outline-none focus:border-kur-accent"
+                  />
+                  {passwordError && <p className="text-xs text-kur-red">{passwordError}</p>}
+                  {passwordMsg && <p className="text-xs text-kur-green">{passwordMsg}</p>}
+                  <button
+                    onClick={handleSetPassword}
+                    disabled={savingPassword || newPassword.length < 8 || (!!vaultInfo.has_password && !currentPassword)}
+                    className="px-4 py-2 bg-kur-accent/10 text-kur-accent border border-kur-accent/30 rounded-lg hover:bg-kur-accent/20 transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {savingPassword ? 'Salvando...' : 'Salvar senha'}
+                  </button>
+                  <p className="text-xs text-kur-text-muted leading-relaxed">
+                    A senha é usada pelo nó para cifrar a chave desta carteira. Se você
+                    esquecê-la, restaure com as 24 palavras informando uma senha nova.
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
 
           {allTxs.length === 0 ? (
             <div className="panel p-8 text-center">

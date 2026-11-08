@@ -20,6 +20,7 @@ const WORD_COUNT = 24;
 export default function RestoreWalletForm({ onRestored, onCancel }: Props) {
   const { restoreAndConnect } = useWallet();
   const [phrase, setPhrase] = useState('');
+  const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -28,11 +29,19 @@ export default function RestoreWalletForm({ onRestored, onCancel }: Props) {
 
   const handleRestore = async () => {
     if (!ready || loading) return;
+    if (password && password.length < 8) {
+      setError('A senha deve ter pelo menos 8 caracteres (ou deixe em branco).');
+      return;
+    }
     setLoading(true);
     setError('');
     try {
-      const address = await restoreAndConnect(words.join(' ').toLowerCase());
+      const address = await restoreAndConnect(
+        words.join(' ').toLowerCase(),
+        password || undefined,
+      );
       setPhrase(''); // descarta a frase da memória
+      setPassword('');
       onRestored?.(address);
     } catch (err: any) {
       setError(err.message || 'Erro ao restaurar carteira');
@@ -65,6 +74,25 @@ export default function RestoreWalletForm({ onRestored, onCancel }: Props) {
             <span className="text-xs text-kur-yellow">Faltam {WORD_COUNT - words.length}</span>
           )}
         </div>
+      </div>
+
+      <div>
+        <label className="block text-xs text-kur-text-muted mb-1.5 font-medium">
+          Senha para enviar (opcional)
+        </label>
+        <input
+          type="password"
+          value={password}
+          onChange={(e) => { setPassword(e.target.value); setError(''); }}
+          placeholder="Mínimo 8 caracteres"
+          autoComplete="new-password"
+          className="w-full bg-kur-bg border border-kur-border rounded-lg px-3 py-2.5 text-sm text-kur-text placeholder-kur-text-muted focus:outline-none focus:border-kur-accent"
+        />
+        <p className="mt-1.5 text-xs text-kur-text-muted leading-relaxed">
+          {password
+            ? 'Esta senha passa a ser exigida em cada envio desta carteira.'
+            : 'Sem senha, quem souber o endereço consegue enviar pela API. Se a carteira já tinha senha, ela continua valendo.'}
+        </p>
       </div>
 
       <p className="text-xs text-kur-text-muted leading-relaxed">

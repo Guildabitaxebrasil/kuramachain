@@ -104,6 +104,25 @@ class TestWalletMnemonicAPI(unittest.TestCase):
         self.assertEqual(data['address'], esperada.address)
         self.assertNotIn('private_key_pem', data)
 
+    def test_restauracao_com_senha_cifra_a_chave_no_cofre(self):
+        frase = generate_mnemonic()
+        resp = self.client.post(
+            '/wallet/restore', json={'mnemonic': frase, 'password': 'frase1234'}
+        )
+        self.assertEqual(resp.status_code, 200, msg=resp.get_json())
+        data = resp.get_json()
+        self.assertTrue(data['has_password'])
+
+        from core.wallet_vault import get_private_key, wallet_info, PasswordRequired
+        info = wallet_info(data['address'])
+        self.assertTrue(info['in_vault'])
+        self.assertTrue(info['has_password'])
+        with self.assertRaises(PasswordRequired):
+            get_private_key(data['address'])  # sem a senha, não assina
+        self.assertIn(
+            'BEGIN', get_private_key(data['address'], 'frase1234')
+        )
+
     def test_restauracao_rejeita_frase_invalida(self):
         resp = self.client.post(
             '/wallet/restore',

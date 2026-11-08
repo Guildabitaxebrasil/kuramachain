@@ -360,6 +360,82 @@ class TestAPITransactions(unittest.TestCase):
         self.assertEqual(resp.status_code, 400)
         self.assertEqual(resp.get_json().get('code'), 'SIGNER_NOT_FOUND')
 
+    def test_wallet_with_password_only_signs_with_the_password(self):
+        """Senha definida na criacao cifra a chave e e exigida em cada envio."""
+        nova = self.client.post(
+            '/wallet/new', json={'password': 'segredo123'}
+        ).get_json()
+        self.assertTrue(nova['has_password'])
+
+        for _ in range(3):
+            self.client.post('/mine', json={'miner_address': nova['address']})
+
+        base = {
+            'from_address': nova['address'],
+            'receiver': self.wallet.address,
+            'amount': 1.0,
+            'fee': 0.001,
+        }
+        sem_senha = self.client.post('/api/transactions/create-signed', json=base)
+        self.assertEqual(sem_senha.status_code, 400)
+        self.assertEqual(sem_senha.get_json().get('code'), 'PASSWORD_REQUIRED')
+
+        errada = self.client.post(
+            '/api/transactions/create-signed',
+            json={**base, 'password': 'senha-errada'},
+        )
+        self.assertEqual(errada.status_code, 400)
+        self.assertEqual(errada.get_json().get('code'), 'WRONG_PASSWORD')
+
+        ok = self.client.post(
+            '/api/transactions/create-signed',
+            json={**base, 'password': 'segredo123'},
+        )
+        self.assertEqual(ok.status_code, 201, msg=ok.get_json())
+
+        # A chave desta carteira nao pode estar em texto no arquivo do cofre.
+        with open(os.environ['KURAMA_WALLETS_FILE'], 'r', encoding='utf-8') as f:
+            cofre = json.load(f)
+        registro = cofre[nova['address']]
+        self.assertNotIn('private_key_pem', registro)
+        self.assertEqual(registro['cipher']['algo'], 'aes-256-gcm')
+
+    def test_set_password_protege_carteira_ja_criada(self):
+        """Carteira sem senha pode ser protegida depois (com senha atual)."""
+        nova = self.client.post('/wallet/new', json={}).get_json()
+        self.assertFalse(nova['has_password'])
+
+        resp = self.client.post('/wallet/password', json={
+            'address': nova['address'],
+            'password': 'minhasenha1',
+        })
+        self.assertEqual(resp.status_code, 200, msg=resp.get_json())
+
+        info = self.client.get(f"/wallet/info/{nova['address']}").get_json()
+        self.assertTrue(info['in_vault'])
+        self.assertTrue(info['has_password'])
+
+        # Trocar a senha exige a atual.
+        sem_atual = self.client.post('/wallet/password', json={
+            'address': nova['address'],
+            'password': 'outrasenha1',
+        })
+        self.assertEqual(sem_atual.status_code, 400)
+        self.assertEqual(sem_atual.get_json().get('code'), 'PASSWORD_REQUIRED')
+
+        trocada = self.client.post('/wallet/password', json={
+            'address': nova['address'],
+            'password': 'outrasenha1',
+            'current_password': 'minhasenha1',
+        })
+        self.assertEqual(trocada.status_code, 200, msg=trocada.get_json())
+
+    def test_wallet_info_de_endereco_fora_do_cofre(self):
+        """Endereco que o no nao conhece nao aparece como assinavel."""
+        info = self.client.get(f'/wallet/info/{Wallet().address}').get_json()
+        self.assertFalse(info['in_vault'])
+        self.assertFalse(info['has_password'])
+
     def test_create_signed_transaction_without_signer_is_400(self):
         """Sem chave privada e sem frase, nada é assinado."""
         resp = self.client.post('/api/transactions/create-signed', json={

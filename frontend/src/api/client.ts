@@ -1,6 +1,6 @@
 import axios from 'axios';
 import type {
-  Block, Transaction, WalletInfo, Stats, MempoolStats,
+  Block, Transaction, WalletInfo, WalletVaultInfo, Stats, MempoolStats,
   ChartDataPoint, NodeInfo, NodesResponse, SearchResult, ChainResponse,
   HealthResponse, MineResponse, BalanceResponse, SupplyResponse
 } from './types';
@@ -39,10 +39,18 @@ export const mineBlock = (miner_address?: string) =>
   postData<MineResponse>('/mine', miner_address ? { miner_address } : {});
 
 // Wallet (POST para prevenir CSRF)
-export const newWallet = () => postData<WalletInfo>('/wallet/new', {});
+/** Cria carteira; `password` (opcional) cifra a chave no cofre do nó. */
+export const newWallet = (password?: string) =>
+  postData<WalletInfo>('/wallet/new', password ? { password } : {});
 /** Recupera uma carteira existente a partir da frase de recuperação (24 palavras). */
-export const restoreWallet = (mnemonic: string) =>
-  postData<WalletInfo>('/wallet/restore', { mnemonic });
+export const restoreWallet = (mnemonic: string, password?: string) =>
+  postData<WalletInfo>('/wallet/restore', password ? { mnemonic, password } : { mnemonic });
+/** Define/troca a senha que protege o envio desta carteira no cofre do nó. */
+export const setWalletPassword = (data: { address: string; password: string; current_password?: string }) =>
+  postData<{ message: string; address: string; has_password: boolean }>('/wallet/password', data);
+/** Se o nó consegue assinar por este endereço e se a carteira tem senha. */
+export const getWalletVaultInfo = (address: string) =>
+  fetchData<WalletVaultInfo>(`/wallet/info/${encodeURIComponent(address)}`);
 export const getBalance = (address: string) => fetchData<BalanceResponse>(`/balance/${address}`);
 
 // Network
@@ -52,7 +60,7 @@ export const getNodes = () => fetchData<NodesResponse>('/api/nodes');
 export const syncNodes = () => postData<{ message: string; chain_replaced: boolean }>('/api/nodes/sync', {});
 
 // Transação assinada no servidor: a UI manda só o endereço de origem.
-export const createSignedTransaction = (data: { from_address?: string; private_key_pem?: string; mnemonic?: string; receiver: string; amount: number; fee?: number }) =>
+export const createSignedTransaction = (data: { from_address?: string; password?: string; private_key_pem?: string; mnemonic?: string; receiver: string; amount: number; fee?: number }) =>
   postData<{
     message: string;
     transaction: Transaction;

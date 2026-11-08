@@ -17,6 +17,9 @@ export default function ConnectWallet() {
   const [error, setError] = useState('');
   const [pasteAddress, setPasteAddress] = useState('');
   const [selectedSaved, setSelectedSaved] = useState('');
+  // Senha opcional da carteira nova: vai só para o cofre do nó, que cifra a
+  // chave com ela e passa a exigi-la em cada envio.
+  const [createPassword, setCreatePassword] = useState('');
   const [view, setView] = useState<'menu' | 'create' | 'restore' | 'existing' | 'paste'>('menu');
   // Frase de recuperação recém-gerada: só em memória, descartada ao fechar.
   const [recoveryPhrase, setRecoveryPhrase] = useState<string | null>(null);
@@ -53,10 +56,15 @@ export default function ConnectWallet() {
   }, []);
 
   const handleCreate = async () => {
+    if (createPassword && createPassword.length < 8) {
+      setError('A senha deve ter pelo menos 8 caracteres (ou deixe em branco).');
+      return;
+    }
     setLoading(true);
     setError('');
     try {
-      const phrase = await createAndConnect();
+      const phrase = await createAndConnect(createPassword || undefined);
+      setCreatePassword('');
       setShowModal(false);
       setView('menu');
       if (phrase) setRecoveryPhrase(phrase);
@@ -112,7 +120,7 @@ export default function ConnectWallet() {
     return (
       <>
         <button
-          onClick={() => { setShowModal(true); clearMessages(); }}
+          onClick={() => { setShowModal(true); setCreatePassword(''); clearMessages(); }}
           className="flex items-center gap-1.5 px-3 py-2 bg-kur-accent/10 text-kur-accent border border-kur-accent/30 rounded-lg hover:bg-kur-accent/20 transition-colors text-xs font-medium whitespace-nowrap"
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -216,6 +224,24 @@ export default function ConnectWallet() {
                         Será gerado um par de chaves ECDSA (secp256k1) com uma frase de
                         recuperação de 24 palavras. Anote a frase em papel: ela aparece uma
                         única vez e não fica salva no navegador nem no servidor.
+                      </p>
+                    </div>
+                    <div>
+                      <label className="block text-xs text-kur-text-muted mb-1.5 font-medium">
+                        Senha para enviar (opcional)
+                      </label>
+                      <input
+                        type="password"
+                        value={createPassword}
+                        onChange={e => { setCreatePassword(e.target.value); setError(''); }}
+                        placeholder="Mínimo 8 caracteres"
+                        autoComplete="new-password"
+                        className="w-full bg-kur-bg border border-kur-border rounded-lg px-3 py-2.5 text-sm text-kur-text placeholder-kur-text-muted focus:outline-none focus:border-kur-accent"
+                      />
+                      <p className="mt-1.5 text-xs text-kur-text-muted leading-relaxed">
+                        Com senha, a chave fica cifrada no nó e cada envio pede a
+                        senha. Sem senha, quem souber o endereço consegue enviar
+                        pela API.
                       </p>
                     </div>
                     <button

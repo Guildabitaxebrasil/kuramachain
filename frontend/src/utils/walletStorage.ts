@@ -13,6 +13,8 @@ export interface StoredWallet {
   public_key: string;
   label: string;
   created_at: number;
+  /** A carteira do cofre do nó pede senha para enviar. */
+  has_password?: boolean;
 }
 
 const STORAGE_KEY = 'kurama_wallets';

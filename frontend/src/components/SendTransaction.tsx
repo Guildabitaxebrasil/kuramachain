@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { createSignedTransaction } from '../api/client';
+import { createSignedTransaction, getWalletVaultInfo } from '../api/client';
 import { getStoredWallets, type StoredWallet } from '../utils/walletStorage';
 import { useWallet } from '../context/WalletContext';
 
@@ -18,6 +18,11 @@ export default function SendTransaction({ isOpen, onClose, onSuccess, onError }:
   const [amount, setAmount] = useState('');
   const [fee, setFee] = useState('0.001');
   const [sending, setSending] = useState(false);
+  /* Senha da carteira de origem: o nó decifra a chave com ela na hora de
+     assinar e não guarda nada. Só aparece quando a carteira tem senha. */
+  const [password, setPassword] = useState('');
+  const [hasPassword, setHasPassword] = useState(false);
+  const [sendError, setSendError] = useState('');
   /* Etapa do modal: preenche os dados e só envia depois de conferir e
      confirmar o endereço de destino. */
   const [step, setStep] = useState<'form' | 'confirm'>('form');
@@ -33,12 +38,29 @@ export default function SendTransaction({ isOpen, onClose, onSuccess, onError }:
       setFee('0.001');
       setStep('form');
       setSending(false);
+      setPassword('');
+      setHasPassword(false);
+      setSendError('');
       // Carteira conectada já vem escolhida como origem.
       if (currentAddress && stored.some(w => w.address === currentAddress)) {
         setSelectedWallet(currentAddress);
       }
     }
   }, [isOpen, currentAddress]);
+
+  // Pergunta ao nó se esta carteira pede senha (a chave fica lá).
+  useEffect(() => {
+    setSendError('');
+    if (!selectedWallet) {
+      setHasPassword(false);
+      return;
+    }
+    let active = true;
+    getWalletVaultInfo(selectedWallet)
+      .then(info => { if (active) setHasPassword(!!info.has_password); })
+      .catch(() => { if (active) setHasPassword(false); });
+    return () => { active = false; };
+  }, [selectedWallet]);
 
   const isEvmReceiver = /^0x[0-9a-fA-F]{40}$/.test(receiver.trim());
   const selected = wallets.find(w => w.address === selectedWallet);
@@ -76,18 +98,28 @@ export default function SendTransaction({ isOpen, onClose, onSuccess, onError }:
     // cofre do nó e é usada lá mesmo para assinar a transação.
     const payload = {
       from_address: selected?.address || '',
+      password: hasPassword ? password : undefined,
       receiver: receiver.trim(),
       amount: parseFloat(amount),
       fee: parseFloat(fee),
     };
 
     setSending(true);
+    setSendError('');
     try {
       const result = await createSignedTransaction(payload);
       onSuccess(`✅ ${result.message}`);
       onClose();
     } catch (err: any) {
+      const code = err?.response?.data?.code;
       const msg = err?.response?.data?.error || err?.message || 'Erro ao criar transação';
+      // Senha faltando/errada: fica na confirmação para o usuário corrigir.
+      if (code === 'PASSWORD_REQUIRED' || code === 'WRONG_PASSWORD') {
+        setHasPassword(true);
+        setSendError(msg);
+        if (code === 'WRONG_PASSWORD') setPassword('');
+        return;
+      }
       onError(`❌ ${msg}`);
       setStep('form');
     } finally {
@@ -145,6 +177,32 @@ export default function SendTransaction({ isOpen, onClose, onSuccess, onError }:
                 </div>
               </div>
             </div>
+            {hasPassword ? (
+              <div>
+                <label className="block text-sm font-medium text-kur-text mb-1.5">
+                  Senha da carteira
+                </label>
+                <input
+                  type="password"
+                  value={password}
+                  onChange={e => { setPassword(e.target.value); setSendError(''); }}
+                  placeholder="Senha definida ao criar/restaurar"
+                  autoComplete="current-password"
+                  autoFocus
+                  className="w-full bg-kur-bg border border-kur-border rounded-lg px-3 py-2.5 text-sm text-kur-text placeholder-kur-text-muted focus:outline-none focus:border-kur-accent focus:shadow-glow-sm"
+                />
+                <p className="mt-1.5 text-xs text-kur-text-muted">
+                  O nó usa a senha só para decifrar a chave nesta assinatura — ela não
+                  fica guardada no navegador nem no servidor.
+                </p>
+                {sendError && <p className="mt-1.5 text-xs text-kur-red">{sendError}</p>}
+              </div>
+            ) : (
+              <p className="text-xs text-kur-text-muted">
+                Esta carteira não tem senha. Defina uma em <strong>Carteira</strong> para
+                que ninguém envie só com o endereço.
+              </p>
+            )}
             <p className="text-xs text-kur-yellow">
               ⚠️ Confira o endereço de destino: uma transação enviada não pode ser desfeita.
             </p>
@@ -263,7 +321,7 @@ export default function SendTransaction({ isOpen, onClose, onSuccess, onError }:
               </button>
               <button
                 onClick={handleSend}
-                disabled={sending}
+                disabled={sending || (hasPassword && !password)}
                 className="px-6 py-2.5 bg-kur-gradient text-white rounded-xl font-semibold shadow-glow-sm hover:brightness-110 transition-all text-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
               >
                 {sending ? (
