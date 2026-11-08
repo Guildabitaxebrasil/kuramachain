@@ -12,6 +12,10 @@ import sys
 import os
 import argparse
 
+# Mesma política do run.py: sem a chave devolvida por /wallet/new e
+# /wallet/restore, a carteira salva no navegador não consegue assinar.
+os.environ.setdefault('KURAMA_DEV_EXPOSE_KEYS', 'true')
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from api.routes import create_app

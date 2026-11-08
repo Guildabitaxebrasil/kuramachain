@@ -1178,9 +1178,10 @@ Documentação completa dos endpoints e schemas.
         (Web Crypto), para nunca trafegar pela rede.
 
         SEGURANÇA (chave privada):
-        - Por padrão a chave privada NÃO é devolvida, nem em desenvolvimento.
-        - Para assinar localmente no frontend, ligue explicitamente
-          KURAMA_DEV_EXPOSE_KEYS=true (nunca em produção).
+        - A chave privada só sai com KURAMA_DEV_EXPOSE_KEYS=true (run.py e
+          start_dev.py ligam por padrão; em produção é ignorada).
+        - Ela vai apenas para quem acabou de criar/restaurar a carteira, uma
+          única vez por resposta, e permite assinar no navegador.
         - A frase de recuperação continua sendo exibida uma única vez:
           sem ela a carteira não pode ser restaurada.
         """

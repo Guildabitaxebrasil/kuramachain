@@ -30,9 +30,23 @@ export function getStoredWallets(): StoredWallet[] {
 
 export function saveWallet(wallet: StoredWallet): void {
   const wallets = getStoredWallets();
-  // Evita duplicatas pelo address
-  const exists = wallets.find(w => w.address === wallet.address);
-  if (exists) return;
+  const index = wallets.findIndex(w => w.address === wallet.address);
+
+  if (index >= 0) {
+    // Carteira já salva: aproveita para gravar a chave privada agora que ela
+    // chegou. Sem isso, quem restaurou uma carteira salva antes (sem chave)
+    // continuava sem conseguir enviar, porque o registro antigo era mantido.
+    if (wallet.private_key_pem) {
+      wallets[index] = {
+        ...wallets[index],
+        public_key: wallet.public_key || wallets[index].public_key,
+        private_key_pem: wallet.private_key_pem,
+      };
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(wallets));
+    }
+    return;
+  }
+
   wallets.push(wallet);
   localStorage.setItem(STORAGE_KEY, JSON.stringify(wallets));
 }

@@ -194,8 +194,10 @@ P2P_HMAC_AUTH = True                     # Usar HMAC-SHA256 em vez de secret pur
 P2P_ENCRYPTION = True                    # Criptografar payloads P2P com AES-256-GCM
 
 # Expor a chave privada em /wallet/new e /wallet/restore (APENAS dev).
-# Desligado por padrão: a chave privada nunca deve trafegar pela rede.
-# Ligue explicitamente com KURAMA_DEV_EXPOSE_KEYS=true e somente em localhost.
+# O servidor devolve a chave só para a carteira recém-criada/restaurada, e o
+# navegador a guarda para assinar as transações — sem ela o envio pela UI é
+# impossível. run.py, start_dev.py e o deploy do Render ligam a variável;
+# em KURAMA_PRODUCTION ela é ignorada.
 DEV_EXPOSE_KEYS = _env('KURAMA_DEV_EXPOSE_KEYS', False)
 
 # Consenso / Finality

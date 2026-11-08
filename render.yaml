@@ -22,15 +22,16 @@ services:
     healthCheckPath: /api/health
     autoDeploy: true
     envVars:
-      # Demonstração pública: /wallet/new NÃO devolve a chave privada
-      # (KURAMA_DEV_EXPOSE_KEYS fica no default false). O envio de
-      # transações da UI exige assinatura no cliente; não ligue o
-      # opt-in de chave privada em um deploy público.
+      # /wallet/new e /wallet/restore devolvem a chave privada da carteira
+      # criada/restaurada para o próprio navegador que a pediu, que a guarda
+      # no localStorage para assinar as transações. Sem isso toda carteira
+      # salva ficava sem chave e o envio pela UI era impossível.
+      # Só a carteira recém-criada/restaurada recebe a chave, uma única vez
+      # por resposta: qualquer outra carteira exige a frase de 24 palavras.
       - key: KURAMA_PRODUCTION
         value: "false"
-      # Opt-in explícito desligado: /wallet/new não devolve chave privada.
       - key: KURAMA_DEV_EXPOSE_KEYS
-        value: "false"
+        value: "true"
       - key: DATA_DIR
         value: data
       - key: CHAIN_FILE

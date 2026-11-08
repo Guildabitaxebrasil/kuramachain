@@ -71,7 +71,8 @@ export default function SendTransaction({ isOpen, onClose, onSuccess, onError }:
       if (!selected.private_key_pem) {
         onError(
           'Esta carteira foi salva sem a chave privada. ' +
-          'Conecte ou restaure a carteira com a frase de recuperação em "Conectar" para enviar.'
+          'Restaure-a uma única vez com a frase de recuperação em "Conectar": ' +
+          'a chave fica salva aqui e os próximos envios não pedem mais as palavras.'
         );
         return;
       }
@@ -231,9 +232,9 @@ export default function SendTransaction({ isOpen, onClose, onSuccess, onError }:
                   )}
                   {selected && !selected.private_key_pem && (
                     <p className="mt-1.5 text-xs text-kur-yellow">
-                      Esta carteira foi salva sem a chave privada (o nó não a devolve).
-                      Conecte ou restaure a carteira com a frase de recuperação em "Conectar"
-                      para conseguir enviar.
+                      Esta carteira foi salva sem a chave privada. Restaure-a uma única vez
+                      com a frase de recuperação em "Conectar": a chave passa a ficar
+                      salva neste navegador e o envio não pede mais as palavras.
                     </p>
                   )}
                 </div>
